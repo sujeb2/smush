@@ -1,4 +1,4 @@
-import model, os, serial
+import model, serial, motor
 from datetime import datetime
 import configparser as cfg
 

@@ -2,6 +2,7 @@ from datetime import datetime
 from teachable_machine import TeachableMachine
 import cv2 as cv
 import configparser as config
+import os
 
 class Model:
 	def __init__(self, model, labels):
@@ -9,14 +10,16 @@ class Model:
 			self.timestamp = datetime.now().strftime('%H:%M:%S')
 			self.vc = cv.VideoCapture(0)
 			self.model = TeachableMachine(model_path=model, labels_flie_path=labels)
-			self.path = "capture.png"
+			self.path = f"./files/captures/capture_{self.timestamp}.png"
 			self.captured = False	
 			self.cfg = config.ConfigParser()
 			if(self.vc.isOpened() == False):
 				print(f"[{self.timestamp}] [ModelRecog] Failed to init camera. check if camera is available.")
 				quit()
+			print(f"[{self.timestamp}] [ModelRecog] available camera: {self.vc.getBackendName()}")
 			try:
 				self.cfg.read('./files/model_conf.ini')
+				print(f"[{self.timestamp}] [ModelRecog] model configuration loaded: {self.cfg.sections()}")
 			except FileNotFoundError:
 				print(f"[{self.timestamp}] [ModelRecog] Failed to read model configuration file. FileNotFoundException")
 				quit()
