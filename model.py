@@ -1,45 +1,74 @@
 from datetime import datetime
-from teachable_machine import TeachableMachine
-import cv2 as cv
-import configparser as config
-import os
+import os, cv2, numpy, cv2
+from keras.models import load_model
+from PIL import Image, ImageOps
+import configparser as cfg
+
+config = cfg.ConfigParser()
+config.read('./files/model_conf.ini', encoding='utf-8')
+numpy.set_printoptions(suppress=False)
 
 class Model:
-	def __init__(self, model, labels):
+	def __init__(self, model_path, labels_path):
 		try:
 			self.timestamp = datetime.now().strftime('%H:%M:%S')
-			self.vc = cv.VideoCapture(0)
-			self.model = TeachableMachine(model_path=model, labels_flie_path=labels)
+			self.vc = cv2.VideoCapture(0)
+			
+			os.makedirs("./files/captures", exist_ok=True)
 			self.path = f"./files/captures/capture_{self.timestamp}.png"
-			self.captured = False	
-			self.cfg = config.ConfigParser()
-			if(self.vc.isOpened() == False):
-				print(f"[{self.timestamp}] [ModelRecog] Failed to init camera. check if camera is available.")
+			self.captured = False
+			print(f"[{self.timestamp}] [ModelRecog] model path: {model_path}, labels path: {labels_path}")
+			
+			if not self.vc.isOpened():
+				print(f"[{self.timestamp}] [ModelRecog] Failed to init camera. Check if camera is connected.")
 				quit()
-			print(f"[{self.timestamp}] [ModelRecog] available camera: {self.vc.getBackendName()}")
+				
+			print(f"[{self.timestamp}] [ModelRecog] Available camera: {self.vc.getBackendName()}")
+			
 			try:
-				self.cfg.read('./files/model_conf.ini')
-				print(f"[{self.timestamp}] [ModelRecog] model configuration loaded: {self.cfg.sections()}")
-			except FileNotFoundError:
-				print(f"[{self.timestamp}] [ModelRecog] Failed to read model configuration file. FileNotFoundException")
-				quit()
-		except:
-			print(f"[{self.timestamp}] [ModelRecog] Failed to init model recog. Check if the files are available.")
-
+				self.model = load_model(model_path, compile=False)
+				self.names = open(labels_path, "r").readlines()
+				print(f"[{self.timestamp}] [ModelRecog] Model config loaded: {config.sections()}")
+			except Exception:
+				print(f"[{self.timestamp}] [ModelRecog] failed to read model configuration sections.")
+			print(f"[{self.timestamp}] [ModelRecog] Model recog init done.")
+			
+		except IOError as e:
+			print(f"[{self.timestamp}] [ModelRecog] IOError: failed to init model recog. Check if files exist.")
+			print(f"[{self.timestamp}] [ModelRecog] Detailed log: {e}")
+		except Exception as e:
+			print(f"[{self.timestamp}] [ModelRecog] Exception: failed to init model recog.")
+			print(f"[{self.timestamp}] [ModelRecog] Detailed log: {e}")
+			
 	def capture(self):
-		while self.captured == False:
-			_, img = cv.read()
-			cv.imwrite(self.path, img)
-			result = self.model.classify_image(self.path)
-			img_result = self.model.show_prediction_on_image(self.path, result)
+		while not self.captured:
+			ret, img = self.vc.read()
+			
+			if not ret or img is None:
+				print(f"[{self.timestamp}] [ModelRecog] failed to grab frame. retry")
+				continue
+			show_vid = 'False'
+			data = numpy.ndarray(shape=(1, 224, 224, 3), dtype=numpy.float32)
+			if 'GENERIC' in config and 'ShowCaptureVid' in config['GENERIC']:
+				show_vid = config['GENERIC']['ShowCaptureVid']
+			
+			# predict part
+			self.image = Image.open(self.path).convert("RGB")
+			self.image = ImageOps.fit(self.iamge, (224, 224), Image.Resampling.LANCZOS)
+			image_array = numpy.asarray(self.image)
+			normal_array = (image_array.astype(numpy.float32) / 127.5)-1
+			self.datas[0] = normal_array
 
-			print(f"[{self.timestamp}] [ModelRecog] class_index: {result['class_index']}, confidence: {result['class_confidence']}, predicted: {result['predictions']}")
-			if self.cfg['GENERIC']['ShowCaptureVid'] == True:
-				cv.imshow("stream", img_result)
-				k = cv.waitKey(1)
-				if k == 27:
-					return result['predictions']
-			return result['predictions']
+			prediction = self.model.predict(self.data)
+			index = numpy.argmax(prediction)
+			class_name = self.names[index]
+			confidence_score = prediction[0][index]
+			print(f"[{self.timestamp}] [ModelRecog] prediction: {class_name} score: {confidence_score}")
+			return class_name.strip()
+
+	def cancel_capture(self):
+		self.captured = True
+		print(f"[{self.timestamp}] [ModelRecog] capture cancelled.")
 		
 	def getIsitCaptured(self):
 		return self.captured

@@ -1,4 +1,4 @@
-import model, serial, motor
+import model, serial
 from datetime import datetime
 import configparser as cfg
 
@@ -32,9 +32,15 @@ class Main:
                     return
                 
                 result = self.model.capture()
-                match result:
-                    case "": #todo: add model name
-                        pass
+                match result: #sample return
+                    case "can":
+                        print(f"[{self.timestamp}] [main] model detected: can")
+                        break
+                    case "plastic":
+                        print(f"[{self.timestamp}] [main] model detected: plastic")
+                        break
+                    case _:
+                        break
 
 if __name__ == "__main__":
     main = Main()

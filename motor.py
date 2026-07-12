@@ -1,4 +1,4 @@
-import serial, enum
+import serial_io, enum
 import configparser as cfg
 from datetime import datetime
 
@@ -15,7 +15,7 @@ class Motor:
     def __init__(self, port):
         self.timestamp = datetime.now().strftime('%H:%M:%S')
         self.port = port
-        self.ser = serial.Serial(port, 9600, timeout=1)
+        self.ser = serial_io.Serial(port, 9600, timeout=1)
         self.currentDirection = None
         self.currentForce = 0
 
