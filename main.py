@@ -10,6 +10,7 @@ class Main:
         try:
             self.timestamp = datetime.now().strftime('%H:%M:%S')
             print(f"[{self.timestamp}] [main] smush starting, config loaded: {cfg.sections()}")
+            print(f"[{self.timestamp}] [main] model path: {cfg['GENERIC']['ModelPath']}, labels path: {cfg['GENERIC']['LabelsPath']}")
             self.model = model.Model(cfg['GENERIC']['ModelPath'], cfg['GENERIC']['LabelsPath'])
             self.serial = serial.Serial(port=cfg['SERIAL']['SerialPort'], baudrate=cfg['SERIAL']['SerialBaudrate'], timeout=1)
             self.serial.open()
@@ -18,8 +19,9 @@ class Main:
                 return
             print(f"[{self.timestamp}] [main] Init done, waiting for serial..")
             self.serial_read()
-        except:
+        except Exception as e:
             print(f"[{self.timestamp}] [main] Failed to init, check if all external components are available.")
+            print(f"[{self.timestamp}] [main] Detailed log: \n{e}")
 
     def serial_read(self):
         while True:

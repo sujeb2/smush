@@ -1,5 +1,5 @@
 from datetime import datetime
-import os, cv2, numpy, cv2
+import os, cv2, numpy, cv2, h5py
 from keras.models import load_model
 from PIL import Image, ImageOps
 import configparser as cfg
@@ -26,20 +26,36 @@ class Model:
 			print(f"[{self.timestamp}] [ModelRecog] Available camera: {self.vc.getBackendName()}")
 			
 			try:
+				self.convert_h5(model_path)
 				self.model = load_model(model_path, compile=False)
 				self.names = open(labels_path, "r").readlines()
 				print(f"[{self.timestamp}] [ModelRecog] Model config loaded: {config.sections()}")
-			except Exception:
+			except Exception as e:
 				print(f"[{self.timestamp}] [ModelRecog] failed to read model configuration sections.")
+				print(f"[{self.timestamp}] [ModelRecog] Detailed log: \n{e}")
 			print(f"[{self.timestamp}] [ModelRecog] Model recog init done.")
 			
 		except IOError as e:
 			print(f"[{self.timestamp}] [ModelRecog] IOError: failed to init model recog. Check if files exist.")
-			print(f"[{self.timestamp}] [ModelRecog] Detailed log: {e}")
+			print(f"[{self.timestamp}] [ModelRecog] Detailed log: \n{e}")
 		except Exception as e:
 			print(f"[{self.timestamp}] [ModelRecog] Exception: failed to init model recog.")
-			print(f"[{self.timestamp}] [ModelRecog] Detailed log: {e}")
-			
+			print(f"[{self.timestamp}] [ModelRecog] Detailed log: \n{e}")
+	
+	def convert_h5(self, file_path: str):
+		f = h5py.File(file_path, mode="r+")
+		model_config_string = f.attrs.get("model_config")
+		if model_config_string.find('"groups": 1,') != -1:
+			model_config_string = model_config_string.replace('"groups": 1,', '')
+			f.attrs.modify('model_config', model_config_string)
+			f.flush()
+			model_config_string = f.attrs.get("model_config")
+			assert model_config_string.find('"groups": 1,') == -1
+			print(f"[{self.timestamp}] [ModelRecog] reconfigured model file: {file_path}")
+		else:
+			print(f"[{self.timestamp}] [ModelRecog] reconfiguring not required, skipping.")
+		f.close()
+
 	def capture(self):
 		while not self.captured:
 			ret, img = self.vc.read()
