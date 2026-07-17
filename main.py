@@ -12,15 +12,15 @@ class Main:
             print(f"[{self.timestamp}] [main] smush starting, config loaded: {cfg.sections()}")
             print(f"[{self.timestamp}] [main] model path: {cfg['GENERIC']['ModelPath']}, labels path: {cfg['GENERIC']['LabelsPath']}")
             self.model = model.Model(cfg['GENERIC']['ModelPath'], cfg['GENERIC']['LabelsPath'])
-            self.serial = serial.Serial(port=cfg['SERIAL']['SerialPort'], baudrate=cfg['SERIAL']['SerialBaudrate'], timeout=1)
-            self.serial.open()
-            if(not self.serial.is_open):
-                print(f"[{self.timestamp}] [main] Failed to find serial port thats avaliable from configuration. Is the device connected?")
-                return
+            #self.serial = serial.Serial(port=cfg['SERIAL']['SerialPort'], baudrate=cfg['SERIAL']['SerialBaudrate'], timeout=1)
+            #self.serial.open()
+            #if(not self.serial.is_open):
+            #    print(f"[{self.timestamp}] [main] Failed to find serial port thats avaliable from configuration. Is the device connected?")
             print(f"[{self.timestamp}] [main] Init done, waiting for serial..")
-            self.serial_read()
+            #self.serial_read()
+            self.model.camera_capture()
         except Exception as e:
-            print(f"[{self.timestamp}] [main] Failed to init, check if all external components are available.")
+            print(f"[{self.timestamp}] [main] Error occurred while executing, check if all external components are available.")
             print(f"[{self.timestamp}] [main] Detailed log: \n{e}")
 
     def serial_read(self):

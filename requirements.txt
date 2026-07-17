@@ -1,6 +1,7 @@
 pyserial
 opencv-python
-teachable-machine
 numpy
 Pillow
-tensorflow
+torch
+tk
+torchvision
