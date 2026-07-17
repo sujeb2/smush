@@ -221,6 +221,4 @@ __marimo__/
 # venv
 venv312/
 venv395/
-files/keras_model.h5
-files/tiny-yolov3.pt
-files/yolov3.pt
+files/models/
