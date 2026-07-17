@@ -222,3 +222,4 @@ __marimo__/
 venv312/
 venv395/
 files/models/
+.DS_Store
