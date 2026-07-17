@@ -16,6 +16,11 @@ class Model:
             self.timestamp = datetime.now().strftime('%H:%M:%S')
             self.vc = cv2.VideoCapture(0)
             self.model_path = model_path
+            if(config['GENERIC'].getboolean('LightMode')):
+                print(f"[{self.timestamp}] [ModelRecog] Light mode enabled. Using low resolution for camera capture.")
+                self.vc.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+                self.vc.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+                self.model_path = model_path.replace("yolov3.pt", "yolov3-tiny.pt")
             
             os.makedirs("./files/captures", exist_ok=True)
             self.path = f"./files/captures/capture_{self.timestamp}.png"
@@ -41,7 +46,10 @@ class Model:
         self.camera = cv2.VideoCapture(0)
         
         self.detector = VideoObjectDetection()
-        self.detector.setModelTypeAsYOLOv3()
+        if(config['GENERIC'].getboolean('LightMode')):
+            self.detector.setModelTypeAsTinyYOLOv3()
+        else:
+            self.detector.setModelTypeAsYOLOv3()
         self.detector.setModelPath(self.model_path)
         self.detector.loadModel()
 
@@ -68,10 +76,13 @@ class Model:
             self.camera.release()
         cv2.destroyAllWindows()
 
-    def capture(self): # generic default image detection
-        print(f"[{self.timestamp}] [ModelRecog] Loading YOLOv3 model. Please wait...")
+    def capture(self):
+        print(f"[{self.timestamp}] [ModelRecog] Model load start.")
         self.object = ObjectDetection()
-        self.object.setModelTypeAsYOLOv3()
+        if(config['GENERIC'].getboolean('LightMode')):
+            self.detector.setModelTypeAsTinyYOLOv3()
+        else:
+            self.detector.setModelTypeAsYOLOv3()
         self.object.setModelPath(self.model_path)
         self.object.loadModel()
         print(f"[{self.timestamp}] [ModelRecog] Model loaded. Starting camera feed.")
