@@ -11,17 +11,16 @@ config.read('./files/model_conf.ini', encoding='utf-8')
 numpy.set_printoptions(suppress=False)
 
 class Model:
-    def __init__(self, model_path, labels_path):
+    def __init__(self, model_path):
         try:
             self.timestamp = datetime.now().strftime('%H:%M:%S')
             self.vc = cv2.VideoCapture(0)
             self.model_path = model_path
-            self.labels_path = labels_path
             
             os.makedirs("./files/captures", exist_ok=True)
             self.path = f"./files/captures/capture_{self.timestamp}.png"
             self.captured = False
-            print(f"[{self.timestamp}] [ModelRecog] model path: {model_path}, labels path: {labels_path}")
+            print(f"[{self.timestamp}] [ModelRecog] model path: {model_path}")
             
             if not self.vc.isOpened():
                 print(f"[{self.timestamp}] [ModelRecog] Failed to init camera. Check if camera is connected.")
@@ -56,7 +55,7 @@ class Model:
 
         video_path = self.detector.detectObjectsFromVideo(
             camera_input=self.camera, 
-            output_file_path=os.path.join(self.execution_path, f"{self.timestamp}_camera_detected_video"), 
+            output_file_path=os.path.join(self.execution_path+"/files/captures/", f"{self.timestamp}_camera_detected_video"), 
             frames_per_second=20, 
             log_progress=True, 
             minimum_percentage_probability=30,
