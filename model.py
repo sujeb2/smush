@@ -80,9 +80,9 @@ class Model:
         print(f"[{self.timestamp}] [ModelRecog] Model load start.")
         self.object = ObjectDetection()
         if(config['GENERIC'].getboolean('LightMode')):
-            self.detector.setModelTypeAsTinyYOLOv3()
+            self.object.setModelTypeAsTinyYOLOv3()
         else:
-            self.detector.setModelTypeAsYOLOv3()
+            self.object.setModelTypeAsYOLOv3()
         self.object.setModelPath(self.model_path)
         self.object.loadModel()
         print(f"[{self.timestamp}] [ModelRecog] Model loaded. Starting camera feed.")

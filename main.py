@@ -19,7 +19,7 @@ class Main:
             #    print(f"[{self.timestamp}] [main] Failed to find serial port thats avaliable from configuration. Is the device connected?")
             print(f"[{self.timestamp}] [main] Init done, waiting for serial..")
             #self.serial_read()
-            self.model.camera_capture()
+            self.model.capture()
         except Exception as e:
             print(f"[{self.timestamp}] [main] Error occurred while executing, check if all external components are available.")
             print(f"[{self.timestamp}] [main] Detailed log: \n{e}")
