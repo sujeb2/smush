@@ -13,6 +13,6 @@ if pyenv versions | grep -q "3.11.15"; then
     pip install -r requirements.txt
     python main.py
 else
-    echo "Python 3.11.15 is not installed, please install by running: pyenv install 3.11.15"
+    echo "Python 3.11.15 is required to run this program, please install by running: pyenv install 3.11.15"
     exit 1
 fi
