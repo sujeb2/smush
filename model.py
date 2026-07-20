@@ -44,7 +44,7 @@ class Model:
             print(f"[{self.timestamp}] [ModelRecog] Detailed log: \n{e}")
 
     def camera_capture(self): # live video feed
-        if(not config['GENERIC'].getboolean('UseNonSupportedModel')):
+        if(not config['GENERIC'].getboolean('UseNonSupportedModel')): # default yolov3
             self.execution_path = os.getcwd()
             self.camera = cv2.VideoCapture(0)
             
@@ -78,9 +78,37 @@ class Model:
             if self.camera.isOpened():
                 self.camera.release()
             cv2.destroyAllWindows()
-        else:
-            print(f"[{self.timestamp}] [ModelRecog] Not supported.")
-            return
+        else: # ultralytics
+            self.camera = cv2.VideoCapture(0)
+            #target_fps = config['GENERIC'].getint('CameraFPS', fallback=20)
+            target_fps = 480
+            self.camera.set(cv2.CAP_PROP_FPS, target_fps)
+            wait_time_ms = int(1000 / target_fps) if target_fps > 0 else 1
+            
+            self.model = YOLO(self.model_path, task='detect', verbose=config['GENERIC'].getboolean('Verbose'))
+            print(f"[{self.timestamp}] [ModelRecog] start live feed.")
+            
+            while True:
+                ret, frame = self.camera.read()
+                
+                if not ret or frame is None:
+                    print(f"[{self.timestamp}] [ModelRecog] failed to grab frame from camera.")
+                    break
+                self.detections = self.model.predict(source=frame, conf=0.10, stream=True)
+                
+                for result in self.detections:
+                    annotated_frame = result.plot()
+                    cv2.imshow('feed', annotated_frame)
+
+                key = cv2.waitKey(wait_time_ms) & 0xFF
+                if key == ord('q'):
+                    self.camera.release()
+                    if hasattr(self, 'cancel_capture'):
+                        self.cancel_capture()
+                    break
+            if self.camera.isOpened():
+                self.camera.release()
+            cv2.destroyAllWindows()
 
     def capture(self):
         print(f"[{self.timestamp}] [ModelRecog] Model load start.")
@@ -127,7 +155,7 @@ class Model:
             self.captured = True
             self.vc.release()
             cv2.destroyAllWindows()
-        else:
+        else: # ultralytics
             self.model = YOLO(self.model_path, verbose=config['GENERIC'].getboolean("Verbose"))
             while not self.captured:
                 ret, img = self.vc.read()
