@@ -22,7 +22,7 @@ class Main:
             self.model.capture()
         except Exception as e:
             print(f"[{self.timestamp}] [main] Error occurred while executing, check if all external components are available.")
-            print(f"[{self.timestamp}] [main] Detailed log: \n{e}")
+            print(f"[{self.timestamp}] [main] Detailed log: {e}")
 
     def fileLimitChecker(self):
         try:
@@ -36,7 +36,7 @@ class Main:
                     print(f"[{self.timestamp}] [main] All files deleted.")
         except OSError as e:
             print(f"[{self.timestamp}] [main] Error occurred while checking capture file limit. (OSError)")
-            print(f"[{self.timestamp}] [main] Detailed log: \n{e}")
+            print(f"[{self.timestamp}] [main] Detailed log: {e}")
 
 if __name__ == "__main__":
     main = Main()

@@ -4,11 +4,13 @@ os.environ['TF_USE_LEGACY_KERAS'] = '1'
 from datetime import datetime
 import cv2, numpy
 from imageai.Detection import ObjectDetection, VideoObjectDetection
+from ultralytics import YOLO
 import configparser as cfg
 
 config = cfg.ConfigParser()
 config.read('./files/model_conf.ini', encoding='utf-8')
 numpy.set_printoptions(suppress=False)
+imageai_supported = ["yolov3.pt","tiny-yolov3.pt"]
 
 class Model:
     def __init__(self, model_path):
@@ -42,78 +44,122 @@ class Model:
             print(f"[{self.timestamp}] [ModelRecog] Detailed log: \n{e}")
 
     def camera_capture(self): # live video feed
-        self.execution_path = os.getcwd()
-        self.camera = cv2.VideoCapture(0)
-        
-        self.detector = VideoObjectDetection()
-        if(config['GENERIC'].getboolean('LightMode')):
-            self.detector.setModelTypeAsTinyYOLOv3()
-        else:
-            self.detector.setModelTypeAsYOLOv3()
-        self.detector.setModelPath(self.model_path)
-        self.detector.loadModel()
+        if(not config['GENERIC'].getboolean('UseNonSupportedModel')):
+            self.execution_path = os.getcwd()
+            self.camera = cv2.VideoCapture(0)
+            
+            self.detector = VideoObjectDetection()
+            if(config['GENERIC'].getboolean('LightMode')):
+                self.detector.setModelTypeAsTinyYOLOv3()
+            else:
+                self.detector.setModelTypeAsYOLOv3()
+            self.detector.setModelPath(self.model_path)
+            self.detector.loadModel()
 
-        def livefeed(returned_frame):
-            cv2.imshow('feed', returned_frame)
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord('q'):
+            def livefeed(returned_frame):
+                cv2.imshow('feed', returned_frame)
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord('q'):
+                    self.camera.release()
+                    if hasattr(self, 'cancel_capture'):
+                        self.cancel_capture()
+
+            video_path = self.detector.detectObjectsFromVideo(
+                camera_input=self.camera, 
+                output_file_path=os.path.join(self.execution_path+"/files/captures/", f"{self.timestamp}_camera_detected_video"), 
+                frames_per_second=20, 
+                log_progress=True, 
+                minimum_percentage_probability=30,
+                per_frame_function=livefeed,
+                return_detected_frame=True
+            )
+
+            print(video_path)
+            if self.camera.isOpened():
                 self.camera.release()
-                if hasattr(self, 'cancel_capture'):
-                    self.cancel_capture()
-
-        video_path = self.detector.detectObjectsFromVideo(
-            camera_input=self.camera, 
-            output_file_path=os.path.join(self.execution_path+"/files/captures/", f"{self.timestamp}_camera_detected_video"), 
-            frames_per_second=20, 
-            log_progress=True, 
-            minimum_percentage_probability=30,
-            per_frame_function=livefeed,
-            return_detected_frame=True
-        )
-
-        print(video_path)
-        if self.camera.isOpened():
-            self.camera.release()
-        cv2.destroyAllWindows()
+            cv2.destroyAllWindows()
+        else:
+            print(f"[{self.timestamp}] [ModelRecog] Not supported.")
+            return
 
     def capture(self):
         print(f"[{self.timestamp}] [ModelRecog] Model load start.")
-        self.object = ObjectDetection()
-        if(config['GENERIC'].getboolean('LightMode')):
-            self.object.setModelTypeAsTinyYOLOv3()
-        else:
-            self.object.setModelTypeAsYOLOv3()
-        self.object.setModelPath(self.model_path)
-        self.object.loadModel()
-        print(f"[{self.timestamp}] [ModelRecog] Model loaded. Starting camera feed.")
+        if(not config['GENERIC'].getboolean('UseNonSupportedModel')): # only for yolov3
+            self.object = ObjectDetection()
+            if(config['GENERIC'].getboolean('LightMode')):
+                self.object.setModelTypeAsTinyYOLOv3()
+            else:
+                self.object.setModelTypeAsYOLOv3()
+            self.object.setModelPath(self.model_path)
+            self.object.loadModel()
+            print(f"[{self.timestamp}] [ModelRecog] Model loaded. Starting camera feed.")
 
-        while not self.captured:
-            ret, img = self.vc.read()
-            
-            if not ret or img is None:
-                print(f"[{self.timestamp}] [ModelRecog] failed to grab frame. retry")
-                continue
-            cv2.imshow('camera feed', img)
-            key = cv2.waitKey(1) & 0xFF
-            
-            if key == ord('c'):
-                cv2.imwrite(self.path, img)
-                print(f"[{self.timestamp}] [ModelRecog] Image captured. Running detection...")
-                self.detections = self.object.detectObjectsFromImage(input_image=self.path, output_image_path=self.path)
+            while not self.captured:
+                ret, img = self.vc.read()
                 
-                for eachObject in self.detections:
-                    print(f"[{self.timestamp}] [ModelRecog] detected: {eachObject['name']} with probability: {eachObject['percentage_probability']}")
-                result_img = cv2.imread(self.path)
-                if result_img is not None:
-                    cv2.imshow('result', result_img)
-                    cv2.waitKey(0)
+                if not ret or img is None:
+                    print(f"[{self.timestamp}] [ModelRecog] failed to grab frame. retry")
+                    continue
+                cv2.imshow('camera feed', img)
+                key = cv2.waitKey(1) & 0xFF
+                
+                if key == ord('c'):
+                    cv2.imwrite(self.path, img)
+                    print(f"[{self.timestamp}] [ModelRecog] Image captured. Running detection...")
+                    self.detections = self.model.predict(source=self.path, conf=0.25, stream=True)
+                    
+                    for result in self.detections:
+                        for box in result.boxes:
+                            class_id = int(box.cls[0])
+                            class_name = result.names[class_id]
+                            probability = float(box.conf[0]) * 100
+                            
+                            print(f"[{self.timestamp}] [ModelRecog] detected: {class_name} with probability: {probability:.2f}%")
+                            
+                    result_img = cv2.imread(self.path)
+                    if result_img is not None:
+                        cv2.imshow('result', result_img)
+                        cv2.waitKey(0)
 
-            elif key == ord('q'):
-                self.cancel_capture()
-                break
-        self.captured = True
-        self.vc.release()
-        cv2.destroyAllWindows()
+                elif key == ord('q'):
+                    self.cancel_capture()
+                    break
+            self.captured = True
+            self.vc.release()
+            cv2.destroyAllWindows()
+        else:
+            self.model = YOLO(self.model_path, verbose=config['GENERIC'].getboolean("Verbose"))
+            while not self.captured:
+                ret, img = self.vc.read()
+                
+                if not ret or img is None:
+                    print(f"[{self.timestamp}] [ModelRecog] failed to grab frame. retry")
+                    continue
+                cv2.imshow('camera feed', img)
+                key = cv2.waitKey(1) & 0xFF
+                
+                if key == ord('c'):
+                    cv2.imwrite(self.path, img)
+                    print(f"[{self.timestamp}] [ModelRecog] Image captured. Running detection...")
+                    self.detections = self.model.predict(source=self.path, conf=0.25, stream=True)
+                    
+                    for result in self.detections:
+                        for i in range(len(result.boxes)):
+                            class_id = int(result.boxes.cls[i])
+                            class_name = result.names[class_id]
+                            probability = float(result.boxes.conf[i]) * 100
+                            
+                            print(f"[{self.timestamp}] [ModelRecog] detected: {class_name} with probability: {probability:.2f}%")
+                        annotated_img = result.plot() 
+                        cv2.imshow('result', annotated_img)
+                        cv2.waitKey(0)
+
+                elif key == ord('q'):
+                    self.cancel_capture()
+                    break
+            self.captured = True
+            self.vc.release()
+            cv2.destroyAllWindows()
 
     def cancel_capture(self):
         self.captured = True
