@@ -18,7 +18,7 @@ class Model:
             self.timestamp = datetime.now().strftime('%H:%M:%S')
             self.vc = cv2.VideoCapture(0)
             self.model_path = model_path
-            if(config['GENERIC'].getboolean('LightMode')):
+            if(config['DETECTION'].getboolean('LightMode')):
                 print(f"[{self.timestamp}] [ModelRecog] Light mode enabled. Using low resolution for camera capture.")
                 self.vc.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
                 self.vc.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
@@ -44,7 +44,7 @@ class Model:
             print(f"[{self.timestamp}] [ModelRecog] Detailed log: \n{e}")
 
     def camera_capture(self): # live video feed
-        if(not config['GENERIC'].getboolean('UseNonSupportedModel')): # default yolov3
+        if(not config['DETECTION'].getboolean('UseNonSupportedModel')): # default yolov3
             self.execution_path = os.getcwd()
             self.camera = cv2.VideoCapture(0)
             
@@ -86,19 +86,27 @@ class Model:
             wait_time_ms = int(1000 / target_fps) if target_fps > 0 else 1
             
             self.model = YOLO(self.model_path, task='detect', verbose=config['GENERIC'].getboolean('Verbose'))
-            print(f"[{self.timestamp}] [ModelRecog] start live feed.")
-            
             while True:
                 ret, frame = self.camera.read()
                 
                 if not ret or frame is None:
                     print(f"[{self.timestamp}] [ModelRecog] failed to grab frame from camera.")
                     break
-                self.detections = self.model.predict(source=frame, conf=0.10, stream=True)
+                self.detections = self.model.predict(source=frame, conf=0.50, stream=True)
                 
                 for result in self.detections:
                     annotated_frame = result.plot()
                     cv2.imshow('feed', annotated_frame)
+                    if(config['DETECTION'].getboolean('HasExpectedObject') and not config['DETECTION'].get('ExpectedObject') == None):
+                        self.confident = result.boxes.conf
+                        self.names = [result.names[cls.item()] for cls in result.boxes.cls.int()]
+                        print(f'confident: {self.confident}, names: {self.names}')
+                        if("bottle" in self.names):
+                            return 0
+                        else:
+                            return 1
+                    else:
+                        return 2
 
                 key = cv2.waitKey(wait_time_ms) & 0xFF
                 if key == ord('q'):
@@ -112,7 +120,7 @@ class Model:
 
     def capture(self):
         print(f"[{self.timestamp}] [ModelRecog] Model load start.")
-        if(not config['GENERIC'].getboolean('UseNonSupportedModel')): # only for yolov3
+        if(not config['DETECTION'].getboolean('UseNonSupportedModel')): # only for yolov3
             self.object = ObjectDetection()
             if(config['GENERIC'].getboolean('LightMode')):
                 self.object.setModelTypeAsTinyYOLOv3()

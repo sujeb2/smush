@@ -19,7 +19,7 @@ class Main:
             #    print(f"[{self.timestamp}] [main] Failed to find serial port thats avaliable from configuration. Is the device connected?")
             print(f"[{self.timestamp}] [main] Init done, waiting for serial..")
             #self.serial_read()
-            self.model.camera_capture()
+            self.checkForBottle()
         except Exception as e:
             print(f"[{self.timestamp}] [main] Error occurred while executing, check if all external components are available.")
             print(f"[{self.timestamp}] [main] Detailed log: {e}")
@@ -37,6 +37,11 @@ class Main:
         except OSError as e:
             print(f"[{self.timestamp}] [main] Error occurred while checking capture file limit. (OSError)")
             print(f"[{self.timestamp}] [main] Detailed log: {e}")
+
+    def checkForBottle(self):
+        while self.model.camera_capture() == 1:
+            print(f"[{self.timestamp}] [main] expected object not found, retrying..")
+        print(f"[{self.timestamp}] [main] bottle found!")
 
 if __name__ == "__main__":
     main = Main()
