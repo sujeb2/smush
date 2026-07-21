@@ -223,3 +223,6 @@ venv312/
 venv395/
 files/models/
 .DS_Store
+main.dist/
+main.build/
+nuitka-crash-report.xml

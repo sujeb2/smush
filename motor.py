@@ -1,9 +1,17 @@
-import serial_io, enum
+import serial_io, enum, os, sys
 import configparser as cfg
 from datetime import datetime
 
+def findCompiledDir():
+    if "__compiled__" in globals():
+        return os.path.dirname(os.path.abspath(sys.argv[0]))
+    else:
+        return os.path.dirname(os.path.abspath(__file__))
+
+base = findCompiledDir()
+
 cfg = cfg.ConfigParser()
-cfg.read('./files/main_conf.ini', encoding='utf-8')
+cfg.read(os.path.join(base, 'files', 'main_conf.ini'), encoding='utf-8')
 
 class Direction(enum.Enum):
     FORWARD = 1

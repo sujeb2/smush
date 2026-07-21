@@ -1,4 +1,4 @@
-import os
+import os, sys
 os.environ['TF_USE_LEGACY_KERAS'] = '1'
 
 from datetime import datetime
@@ -7,8 +7,15 @@ from imageai.Detection import ObjectDetection, VideoObjectDetection
 from ultralytics import YOLO
 import configparser as cfg
 
+def findCompiledDir():
+    if "__compiled__" in globals():
+        return os.path.dirname(os.path.abspath(sys.argv[0]))
+    else:
+        return os.path.dirname(os.path.abspath(__file__))
+
+base = findCompiledDir()
 config = cfg.ConfigParser()
-config.read('./files/model_conf.ini', encoding='utf-8')
+config.read(os.path.join(base, 'files', 'model_conf.ini'), encoding='utf-8')
 numpy.set_printoptions(suppress=False)
 imageai_supported = ["yolov3.pt","tiny-yolov3.pt"]
 
@@ -24,8 +31,8 @@ class Model:
                 self.vc.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
                 self.model_path = model_path.replace("yolov3.pt", "yolov3-tiny.pt")
             
-            os.makedirs("./files/captures", exist_ok=True)
-            self.path = f"./files/captures/capture_{self.timestamp}.png"
+            os.makedirs(os.path.join(base, "files", "captures"), exist_ok=True)
+            self.path = os.path.join(base, "files", "captures", f"capture_{self.timestamp}.png")
             self.captured = False
             print(f"[{self.timestamp}] [ModelRecog] model path: {model_path}")
             
@@ -43,9 +50,9 @@ class Model:
             print(f"[{self.timestamp}] [ModelRecog] Exception: failed to init model recog.")
             print(f"[{self.timestamp}] [ModelRecog] Detailed log: \n{e}")
 
-    def camera_capture(self): # live video feed
+    def liveFeedCapture(self): # live video feed
         if(not config['DETECTION'].getboolean('UseNonSupportedModel')): # default yolov3
-            self.execution_path = os.getcwd()
+            self.execution_path = base
             self.camera = cv2.VideoCapture(0)
             
             self.detector = VideoObjectDetection()
@@ -66,7 +73,7 @@ class Model:
 
             video_path = self.detector.detectObjectsFromVideo(
                 camera_input=self.camera, 
-                output_file_path=os.path.join(self.execution_path+"/files/captures/", f"{self.timestamp}_camera_detected_video"), 
+                output_file_path=os.path.join(self.execution_path, "files", "captures", f"{self.timestamp}_camera_detected_video"), 
                 frames_per_second=20, 
                 log_progress=True, 
                 minimum_percentage_probability=30,
@@ -105,8 +112,6 @@ class Model:
                             return 0
                         else:
                             return 1
-                    else:
-                        return 2
 
                 key = cv2.waitKey(wait_time_ms) & 0xFF
                 if key == ord('q'):
