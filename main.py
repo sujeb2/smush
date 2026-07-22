@@ -1,5 +1,6 @@
 import model, os, sys
 from datetime import datetime
+from serial_io import SerialIO
 import configparser as cfg
 
 def findCompiledDir():
@@ -20,11 +21,11 @@ class Main:
             print(f"[{self.timestamp}] [main] smush starting, config loaded: {cfg.sections()}")
             print(f"[{self.timestamp}] [main] model path: {cfg['GENERIC']['ModelPath']}")
             self.fileLimitChecker()
-            self.model = model.Model(cfg['GENERIC']['ModelPath'])
-            #self.serial = serial.Serial(port=cfg['SERIAL']['SerialPort'], baudrate=cfg['SERIAL']['SerialBaudrate'], timeout=1)
-            #self.serial.open()
-            #if(not self.serial.is_open):
-            #    print(f"[{self.timestamp}] [main] Failed to find serial port thats avaliable from configuration. Is the device connected?")
+            self.serial = SerialIO(cfg['SERIAL']['SerialPort'], 9600, timeout=cfg['SERIAL']['SerialTimeout'])
+            if(not self.serial.is_open()):
+                print(f"[{self.timestamp}] [main] Failed to communicate with serial, please check if serial port configuration is correct.")
+                exit(1)
+            self.model = model.Model(cfg['GENERIC']['ModelPath'], self.serial)
             print(f"[{self.timestamp}] [main] Init done, waiting for serial..")
             self.model.liveFeedCapture()
             #self.checkForBottle()

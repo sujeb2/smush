@@ -5,6 +5,7 @@ from datetime import datetime
 import cv2, numpy
 from imageai.Detection import ObjectDetection, VideoObjectDetection
 from ultralytics import YOLO
+from serial_io import SerialIO
 import configparser as cfg
 
 def findCompiledDir():
@@ -20,7 +21,7 @@ numpy.set_printoptions(suppress=False)
 imageai_supported = ["yolov3.pt","tiny-yolov3.pt"]
 
 class Model:
-    def __init__(self, model_path):
+    def __init__(self, model_path, serial: SerialIO):
         try:
             self.timestamp = datetime.now().strftime('%H:%M:%S')
             self.vc = cv2.VideoCapture(0)
@@ -39,7 +40,8 @@ class Model:
             if not self.vc.isOpened():
                 print(f"[{self.timestamp}] [ModelRecog] Failed to init camera. Check if camera is connected.")
                 quit()
-                
+            
+            self.serial = serial
             print(f"[{self.timestamp}] [ModelRecog] Available camera: {self.vc.getBackendName()}")
             print(f"[{self.timestamp}] [ModelRecog] Model recog init done.")
             
@@ -108,10 +110,10 @@ class Model:
                         self.confident = result.boxes.conf
                         self.names = [result.names[cls.item()] for cls in result.boxes.cls.int()]
                         print(f'confident: {self.confident}, names: {self.names}')
-                        if("bottle" in self.names):
-                            return 0
-                        else:
-                            return 1
+                        if(config['DETECTION']['ExpectedObject_1'] in self.names):
+                            self.serial.write("obj1_detect")
+                        elif(config['DETECTION']['ExpectedObject_2'] in self.names):
+                            self.serial.write("obj2_detect")
 
                 key = cv2.waitKey(wait_time_ms) & 0xFF
                 if key == ord('q'):
