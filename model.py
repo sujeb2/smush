@@ -21,11 +21,12 @@ numpy.set_printoptions(suppress=False)
 imageai_supported = ["yolov3.pt","tiny-yolov3.pt"]
 
 class Model:
-    def __init__(self, model_path, serial: SerialIO):
+    def __init__(self, model_path, serial):
         try:
             self.timestamp = datetime.now().strftime('%H:%M:%S')
             self.vc = cv2.VideoCapture(0)
             self.model_path = model_path
+            self.serial_ignore = True
             if(config['DETECTION'].getboolean('LightMode')):
                 print(f"[{self.timestamp}] [ModelRecog] Light mode enabled. Using low resolution for camera capture.")
                 self.vc.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
@@ -41,7 +42,10 @@ class Model:
                 print(f"[{self.timestamp}] [ModelRecog] Failed to init camera. Check if camera is connected.")
                 quit()
             
-            self.serial = serial
+            if serial != None:
+                self.serial = serial
+                self.serial_ignore = False
+
             print(f"[{self.timestamp}] [ModelRecog] Available camera: {self.vc.getBackendName()}")
             print(f"[{self.timestamp}] [ModelRecog] Model recog init done.")
             
@@ -106,7 +110,7 @@ class Model:
                 for result in self.detections:
                     annotated_frame = result.plot()
                     cv2.imshow('feed', annotated_frame)
-                    if(config['DETECTION'].getboolean('HasExpectedObject') and not config['DETECTION'].get('ExpectedObject_1') == None or not config['DETECTION'].get('ExpectedObject_2') == None):
+                    if(config['DETECTION'].getboolean('HasExpectedObject') and not config['DETECTION'].get('ExpectedObject') == None and not self.serial_ignore):
                         self.confident = result.boxes.conf
                         self.names = [result.names[cls.item()] for cls in result.boxes.cls.int()]
                         print(f'confident: {self.confident}, names: {self.names}')
@@ -125,7 +129,7 @@ class Model:
                 self.camera.release()
             cv2.destroyAllWindows()
 
-    def capture(self):
+    def testCapture(self):
         print(f"[{self.timestamp}] [ModelRecog] Model load start.")
         if(not config['DETECTION'].getboolean('UseNonSupportedModel')): # only for yolov3
             self.object = ObjectDetection()

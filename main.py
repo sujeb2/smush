@@ -21,11 +21,11 @@ class Main:
             print(f"[{self.timestamp}] [main] smush starting, config loaded: {cfg.sections()}")
             print(f"[{self.timestamp}] [main] model path: {cfg['GENERIC']['ModelPath']}")
             self.fileLimitChecker()
-            self.serial = SerialIO(cfg['SERIAL']['SerialPort'], 9600, timeout=cfg['SERIAL']['SerialTimeout'])
-            if(not self.serial.is_open()):
-                print(f"[{self.timestamp}] [main] Failed to communicate with serial, please check if serial port configuration is correct.")
-                exit(1)
-            self.model = model.Model(cfg['GENERIC']['ModelPath'], self.serial)
+            #self.serial = SerialIO(cfg['SERIAL']['SerialPort'], 9600, timeout=cfg['SERIAL']['SerialTimeout'])
+            #if(not self.serial.is_open()):
+            #    print(f"[{self.timestamp}] [main] Failed to communicate with serial, please check if serial port configuration is correct.")
+            #    exit(1)
+            self.model = model.Model(cfg['GENERIC']['ModelPath'], serial=None)
             print(f"[{self.timestamp}] [main] Init done, waiting for serial..")
             self.model.liveFeedCapture()
             #self.checkForBottle()
