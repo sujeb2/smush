@@ -106,7 +106,7 @@ class Model:
                 for result in self.detections:
                     annotated_frame = result.plot()
                     cv2.imshow('feed', annotated_frame)
-                    if(config['DETECTION'].getboolean('HasExpectedObject') and not config['DETECTION'].get('ExpectedObject') == None):
+                    if(config['DETECTION'].getboolean('HasExpectedObject') and not config['DETECTION'].get('ExpectedObject_1') == None or not config['DETECTION'].get('ExpectedObject_2') == None):
                         self.confident = result.boxes.conf
                         self.names = [result.names[cls.item()] for cls in result.boxes.cls.int()]
                         print(f'confident: {self.confident}, names: {self.names}')
