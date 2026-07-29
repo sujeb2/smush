@@ -93,8 +93,7 @@ class Model:
             cv2.destroyAllWindows()
         else: # ultralytics
             self.camera = cv2.VideoCapture(0)
-            #target_fps = config['GENERIC'].getint('CameraFPS', fallback=20)
-            target_fps = 480
+            target_fps = config['GENERIC'].getint('CameraFPS', fallback=480)*2
             self.camera.set(cv2.CAP_PROP_FPS, target_fps)
             wait_time_ms = int(1000 / target_fps) if target_fps > 0 else 1
             
@@ -105,12 +104,12 @@ class Model:
                 if not ret or frame is None:
                     print(f"[{self.timestamp}] [ModelRecog] failed to grab frame from camera.")
                     break
-                self.detections = self.model.predict(source=frame, conf=0.50, stream=True)
+                self.detections = self.model.predict(source=frame, conf=0.25, stream=True)
                 
                 for result in self.detections:
                     annotated_frame = result.plot()
                     cv2.imshow('feed', annotated_frame)
-                    if(config['DETECTION'].getboolean('HasExpectedObject') and not config['DETECTION'].get('ExpectedObject') == None and not self.serial_ignore):
+                    if(config['DETECTION'].getboolean('HasExpectedObject') and not config['DETECTION'].get('ExpectedObject_1') == None or not config['DETECTION'].get('ExpectedObject_2') == None):
                         self.confident = result.boxes.conf
                         self.names = [result.names[cls.item()] for cls in result.boxes.cls.int()]
                         print(f'confident: {self.confident}, names: {self.names}')
@@ -188,7 +187,7 @@ class Model:
                 if key == ord('c'):
                     cv2.imwrite(self.path, img)
                     print(f"[{self.timestamp}] [ModelRecog] Image captured. Running detection...")
-                    self.detections = self.model.predict(source=self.path, conf=0.25, stream=True)
+                    self.detections = self.model.predict(source=self.path, conf=0.10, stream=True)
                     
                     for result in self.detections:
                         for i in range(len(result.boxes)):

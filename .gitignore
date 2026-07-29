@@ -14,8 +14,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+#lib/
+#lib64/
 parts/
 sdist/
 var/
@@ -25,6 +25,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+test/
 
 # PyInstaller
 #   Usually these files are written by a python script from a template
@@ -226,3 +227,5 @@ files/models/
 main.dist/
 main.build/
 nuitka-crash-report.xml
+exp-2/
+runs/
