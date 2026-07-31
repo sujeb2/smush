@@ -2,7 +2,7 @@ import os, sys
 os.environ['TF_USE_LEGACY_KERAS'] = '1'
 
 from datetime import datetime
-import cv2, numpy
+import cv2, numpy, torch
 from imageai.Detection import ObjectDetection, VideoObjectDetection
 from ultralytics import YOLO
 from serial_io import SerialIO
@@ -24,9 +24,15 @@ class Model:
     def __init__(self, model_path, serial):
         try:
             self.timestamp = datetime.now().strftime('%H:%M:%S')
+            print(f'[{self.timestamp}] [ModelRecog] Init model..')
             self.vc = cv2.VideoCapture(0)
             self.model_path = model_path
             self.serial_ignore = True
+            if(not torch.cuda.is_available() and config['GENERIC']['IgnoreGPUWarning'] == 'False'):
+                print(f"[{self.timestamp}] [ModelRecog] This program requires CUDA version 8.6>= to run. Please check if driver is installed correctly or Supported GPU is installed in your computer. Check URL to see CUDA>=8.6 supported GPU. (https://developer.nvidia.com/cuda/gpus)")
+                exit(1)
+            print(f"[{self.timestamp}] [ModelRecog] Found GPU: {torch.cuda.get_device_name()}")
+            print(f"[{self.timestamp}] [ModelRecog] GPU Capability: {torch.cuda.get_device_capability()}")
             if(config['DETECTION'].getboolean('LightMode')):
                 print(f"[{self.timestamp}] [ModelRecog] Light mode enabled. Using low resolution for camera capture.")
                 self.vc.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
@@ -40,7 +46,7 @@ class Model:
             
             if not self.vc.isOpened():
                 print(f"[{self.timestamp}] [ModelRecog] Failed to init camera. Check if camera is connected.")
-                quit()
+                exit(1)
             
             if serial != None:
                 self.serial = serial
@@ -87,7 +93,7 @@ class Model:
                 return_detected_frame=True
             )
 
-            print(video_path)
+            print(f'[{self.timestamp}] [ModelRecog] {video_path}')
             if self.camera.isOpened():
                 self.camera.release()
             cv2.destroyAllWindows()
@@ -98,7 +104,7 @@ class Model:
             wait_time_ms = int(1000 / target_fps) if target_fps > 0 else 1
             
             self.model = YOLO(self.model_path, task='detect', verbose=config['GENERIC'].getboolean('Verbose'))
-            while True:
+            while True:    
                 ret, frame = self.camera.read()
                 
                 if not ret or frame is None:

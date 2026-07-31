@@ -28,9 +28,10 @@ class Main:
                     exit(1)
             self.model = model.Model(cfg['GENERIC']['ModelPath'], serial=None)
             print(f"[{self.timestamp}] [main] Init done, waiting for serial..")
-            if(cfg['GENERIC']['SkipToLiveFeed'] == 'True'):
-                self.model.liveFeedCapture()
-            else: self.checkForBottle()
+            self.model.liveFeedCapture()
+            #if(cfg['GENERIC']['SkipToLiveFeed'] == 'True'):
+            #    self.model.liveFeedCapture()
+            #else: self.checkForBottle()
         except Exception as e:
             print(f"[{self.timestamp}] [main] Error occurred while executing, check if all external components are available.")
             print(f"[{self.timestamp}] [main] Detailed log: {e.with_traceback()}")
