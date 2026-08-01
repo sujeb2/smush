@@ -118,11 +118,13 @@ class Model:
                     if(config['DETECTION'].getboolean('HasExpectedObject') and not config['DETECTION'].get('ExpectedObject_1') == None or not config['DETECTION'].get('ExpectedObject_2') == None):
                         self.confident = result.boxes.conf
                         self.names = [result.names[cls.item()] for cls in result.boxes.cls.int()]
-                        print(f'confident: {self.confident}, names: {self.names}')
+                        print(f'[{self.timestamp}] [ModelRecog] confident: {self.confident}, names: {self.names}')
                         if(config['DETECTION']['ExpectedObject_1'] in self.names):
-                            self.serial.write("obj1_detect")
+                            self.serial.write(f"obj1_detect[{config['DETECTION']['ExpectedObject_1']}]\n")
+                            return 0
                         elif(config['DETECTION']['ExpectedObject_2'] in self.names):
-                            self.serial.write("obj2_detect")
+                            self.serial.write(f"obj2_detect[{config['DETECTION']['ExpectedObject_2']}]\n")
+                            return 0
 
                 key = cv2.waitKey(wait_time_ms) & 0xFF
                 if key == ord('q'):

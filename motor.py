@@ -36,6 +36,8 @@ class Motor:
             print(f"[{self.timestamp}] [motor] invalid direction value. expected one of {list(Direction)}.")
             return
 
+        
+
     def getCurrentDirection(self):
         return self.currentDirection
 
