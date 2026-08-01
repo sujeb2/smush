@@ -23,11 +23,11 @@ class SerialIO:
         """
         if self.ser.is_open and data is not None:
             self.ser.write(data.encode('utf-8'))
-            #print(f'[{self.timestamp}] [SerialIO] write: {data.encode('utf-8')}')
+            print(f'[{self.timestamp}] [SerialIO] write: {data}')
 
     def read(self):
         if self.ser.is_open and self.ser.in_waiting > 0:
-            #print(f'[{self.timestamp}] [SerialIO] read: {self.ser.readline().encode('utf-8')}')
+            print(f'[{self.timestamp}] [SerialIO] read: {self.ser.readline()}')
             return self.ser.readline().decode('utf-8').rstrip()
         return None
 
