@@ -27,16 +27,17 @@ class Model:
             self.vc = cv2.VideoCapture(0)
             self.model_path = model_path
             self.serial_ignore = True
-            if(not torch.cuda.is_available() and config['GENERIC']['IgnoreGPUWarning'] == 'False'):
-                print(f"[{self.timestamp}] [ModelRecog] This program requires CUDA version 8.6>= to run. Please check if driver is installed correctly or Supported GPU is installed in your computer. Check URL to see CUDA>=8.6 supported GPU. (https://developer.nvidia.com/cuda/gpus)")
-                exit(1)
-            print(f"[{self.timestamp}] [ModelRecog] Found GPU: {torch.cuda.get_device_name()}")
-            print(f"[{self.timestamp}] [ModelRecog] GPU Capability: {torch.cuda.get_device_capability()}")
+            if(config['GENERIC']['IgnoreGPUWarning'] == 'False'):
+                if(not torch.cuda.is_available()):
+                    print(f"[{self.timestamp}] [ModelRecog] This program requires CUDA version 8.6>= to run. Please check if driver is installed correctly or Supported GPU is installed in your computer. Check URL to see CUDA>=8.6 supported GPU. (https://developer.nvidia.com/cuda/gpus)")
+                    exit(1)
+                print(f"[{self.timestamp}] [ModelRecog] Found GPU: {torch.cuda.get_device_name()}")
+                print(f"[{self.timestamp}] [ModelRecog] GPU Capability: {torch.cuda.get_device_capability()})")
             if(config['DETECTION'].getboolean('LightMode')):
                 print(f"[{self.timestamp}] [ModelRecog] Light mode enabled. Using low resolution for camera capture.")
                 self.vc.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
                 self.vc.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
-                self.model_path = model_path.replace("yolov3.pt", "yolov3-tiny.pt")
+                self.model_path = model_path.replace("yolov3.pt", imageai_supported[1])
             
             os.makedirs(os.path.join(base, "files", "captures"), exist_ok=True)
             self.path = os.path.join(base, "files", "captures", f"capture_{self.timestamp}.png")

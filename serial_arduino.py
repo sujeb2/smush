@@ -1,4 +1,5 @@
-import serial_io, datetime
+import serial
+from datetime import datetime
 
 class SerialIO:
     def __init__(self, port, baudrate, timeout):
@@ -6,7 +7,8 @@ class SerialIO:
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
-        self.ser = serial_io.Serial(port, baudrate, timeout=timeout)
+        print(f"[{self.timestamp}] [SerialIO] Initializing serial port: {port} at {baudrate} baudrate with timeout {timeout}.")
+        self.ser = serial.Serial(port, baudrate, timeout=timeout)
         print(f"[{self.timestamp}] [SerialIO] Serial port init done: {port} at {baudrate} baudrate.")
 
     def open(self):

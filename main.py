@@ -1,6 +1,6 @@
 import model, os, sys
 from datetime import datetime
-from serial_io import SerialIO
+from serial_arduino import SerialIO
 import configparser as cfg
 
 def findCompiledDir():
@@ -23,8 +23,8 @@ class Main:
             print(f"[{self.timestamp}] [main] model path: {cfg['GENERIC']['ModelPath']}")
             self.fileLimitChecker()
             if(cfg['GENERIC']['SkipSerialCheck'] == 'False'):
-                self.serial = SerialIO(cfg['SERIAL']['SerialPort'], 9600, timeout=cfg['SERIAL']['SerialTimeout'])
-                if(not self.serial.is_open()):
+                self.serial = SerialIO(cfg['SERIAL']['SerialPort'], cfg['SERIAL']['SerialBaudrate'], timeout=cfg['SERIAL'].getint('SerialTimeout'))
+                if(not self.serial.is_open):
                     print(f"[{self.timestamp}] [main] Failed to communicate with serial, please check if serial port configuration is correct.")
                     exit(1)
             self.model = model.Model(cfg['GENERIC']['ModelPath'], serial=self.serial)

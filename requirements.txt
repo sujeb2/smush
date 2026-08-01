@@ -6,3 +6,5 @@ torch
 tk
 torchvision
 ultralytics
+imageai
+nuitka
