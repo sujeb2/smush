@@ -5,7 +5,6 @@ from datetime import datetime
 import cv2, numpy, torch
 from imageai.Detection import ObjectDetection, VideoObjectDetection
 from ultralytics import YOLO
-from serial_io import SerialIO
 import configparser as cfg
 
 def findCompiledDir():
@@ -104,7 +103,7 @@ class Model:
             wait_time_ms = int(1000 / target_fps) if target_fps > 0 else 1
             
             self.model = YOLO(self.model_path, task='detect', verbose=config['GENERIC'].getboolean('Verbose'))
-            self.model.device = "cuda:0" if not torch.cuda.is_available() else "cpu"
+            self.model.device = "cpu" if not torch.cuda.is_available() else "cuda:0"
             while True:    
                 ret, frame = self.camera.read()
                 

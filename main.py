@@ -18,6 +18,7 @@ class Main:
     def __init__(self):
         try:
             self.timestamp = datetime.now().strftime('%H:%M:%S')
+            self.serial = None
             print(f"[{self.timestamp}] [main] smush starting, config loaded: {cfg.sections()}")
             print(f"[{self.timestamp}] [main] model path: {cfg['GENERIC']['ModelPath']}")
             self.fileLimitChecker()
@@ -26,7 +27,7 @@ class Main:
                 if(not self.serial.is_open()):
                     print(f"[{self.timestamp}] [main] Failed to communicate with serial, please check if serial port configuration is correct.")
                     exit(1)
-            self.model = model.Model(cfg['GENERIC']['ModelPath'], serial=None)
+            self.model = model.Model(cfg['GENERIC']['ModelPath'], serial=self.serial)
             print(f"[{self.timestamp}] [main] Init done, waiting for serial..")
             self.model.liveFeedCapture()
             #if(cfg['GENERIC']['SkipToLiveFeed'] == 'True'):
@@ -34,7 +35,7 @@ class Main:
             #else: self.checkForBottle()
         except Exception as e:
             print(f"[{self.timestamp}] [main] Error occurred while executing, check if all external components are available.")
-            print(f"[{self.timestamp}] [main] Detailed log: {e.with_traceback()}")
+            print(f"[{self.timestamp}] [main] Detailed log: {e.with_traceback(e.__traceback__)}")
 
     def fileLimitChecker(self):
         try:
