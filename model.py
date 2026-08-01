@@ -104,6 +104,7 @@ class Model:
             wait_time_ms = int(1000 / target_fps) if target_fps > 0 else 1
             
             self.model = YOLO(self.model_path, task='detect', verbose=config['GENERIC'].getboolean('Verbose'))
+            self.model.device = "cuda:0" if not torch.cuda.is_available() else "cpu"
             while True:    
                 ret, frame = self.camera.read()
                 
