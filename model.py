@@ -103,8 +103,7 @@ class Model:
             self.camera.set(cv2.CAP_PROP_FPS, target_fps)
             wait_time_ms = int(1000 / target_fps) if target_fps > 0 else 1
             
-            self.model = YOLO(self.model_path, task='detect', verbose=config['GENERIC'].getboolean('Verbose'))
-            self.model.device = "cpu" if not torch.cuda.is_available() else "cuda:0"
+            self.model = YOLO(self.model_path, task='detect', verbose=config['GENERIC'].getboolean('Verbose')).to("cpu" if not torch.cuda.is_available() else "cuda:0")
             while True:    
                 ret, frame = self.camera.read()
                 
