@@ -63,7 +63,45 @@ class Model:
             print(f"[{self.timestamp}] [ModelRecog] Detailed log: \n{e}")
 
     def liveFeedCapture(self): # live video feed
-        if(not config['DETECTION'].getboolean('UseNonSupportedModel')): # default yolov3
+        try:
+            self.camera = cv2.VideoCapture(0)
+            target_fps = config['GENERIC'].getint('CameraFPS', fallback=480)*2
+            self.camera.set(cv2.CAP_PROP_FPS, target_fps)
+            wait_time_ms = int(1000 / target_fps) if target_fps > 0 else 1
+                
+            self.model = YOLO(self.model_path, task='detect', verbose=config['GENERIC'].getboolean('Verbose')).to("cpu" if not torch.cuda.is_available() else "cuda:0")
+            while True:    
+                ret, frame = self.camera.read()
+                    
+                if not ret or frame is None:
+                    print(f"[{self.timestamp}] [ModelRecog] failed to grab frame from camera.")
+                    break
+                self.detections = self.model.predict(source=frame, conf=0.25, stream=True)
+                    
+                for result in self.detections:
+                    annotated_frame = result.plot()
+                    cv2.imshow('feed', annotated_frame)
+                    if(config['DETECTION'].getboolean('HasExpectedObject') and not config['DETECTION'].get('ExpectedObject_1') == None or not config['DETECTION'].get('ExpectedObject_2') == None):
+                        self.confident = result.boxes.conf
+                        self.names = [result.names[cls.item()] for cls in result.boxes.cls.int()]
+                        print(f'[{self.timestamp}] [ModelRecog] confident: {self.confident}, names: {self.names}')
+                        if(config['DETECTION']['ExpectedObject_1'] in self.names):
+                            self.serial.write(f"obj1_detect[{config['DETECTION']['ExpectedObject_1']}]\n")
+                            return 0
+                        elif(config['DETECTION']['ExpectedObject_2'] in self.names):
+                            self.serial.write(f"obj2_detect[{config['DETECTION']['ExpectedObject_2']}]\n")
+                            return 0
+                key = cv2.waitKey(wait_time_ms) & 0xFF
+                if key == ord('q'):
+                    self.camera.release()
+                    if hasattr(self, 'cancel_capture'):
+                        self.cancel_capture()
+                    break
+                if self.camera.isOpened():
+                    self.camera.release()
+                cv2.destroyAllWindows()
+        except Exception as e:
+            print(f'[{self.timestamp}] [ModelRecog] Ultralytics error occurred. Using fallback imageai ({e})')
             self.execution_path = base
             self.camera = cv2.VideoCapture(0)
             
@@ -94,44 +132,6 @@ class Model:
             )
 
             print(f'[{self.timestamp}] [ModelRecog] {video_path}')
-            if self.camera.isOpened():
-                self.camera.release()
-            cv2.destroyAllWindows()
-        else: # ultralytics
-            self.camera = cv2.VideoCapture(0)
-            target_fps = config['GENERIC'].getint('CameraFPS', fallback=480)*2
-            self.camera.set(cv2.CAP_PROP_FPS, target_fps)
-            wait_time_ms = int(1000 / target_fps) if target_fps > 0 else 1
-            
-            self.model = YOLO(self.model_path, task='detect', verbose=config['GENERIC'].getboolean('Verbose')).to("cpu" if not torch.cuda.is_available() else "cuda:0")
-            while True:    
-                ret, frame = self.camera.read()
-                
-                if not ret or frame is None:
-                    print(f"[{self.timestamp}] [ModelRecog] failed to grab frame from camera.")
-                    break
-                self.detections = self.model.predict(source=frame, conf=0.25, stream=True)
-                
-                for result in self.detections:
-                    annotated_frame = result.plot()
-                    cv2.imshow('feed', annotated_frame)
-                    if(config['DETECTION'].getboolean('HasExpectedObject') and not config['DETECTION'].get('ExpectedObject_1') == None or not config['DETECTION'].get('ExpectedObject_2') == None):
-                        self.confident = result.boxes.conf
-                        self.names = [result.names[cls.item()] for cls in result.boxes.cls.int()]
-                        print(f'[{self.timestamp}] [ModelRecog] confident: {self.confident}, names: {self.names}')
-                        if(config['DETECTION']['ExpectedObject_1'] in self.names):
-                            self.serial.write(f"obj1_detect[{config['DETECTION']['ExpectedObject_1']}]\n")
-                            return 0
-                        elif(config['DETECTION']['ExpectedObject_2'] in self.names):
-                            self.serial.write(f"obj2_detect[{config['DETECTION']['ExpectedObject_2']}]\n")
-                            return 0
-
-                key = cv2.waitKey(wait_time_ms) & 0xFF
-                if key == ord('q'):
-                    self.camera.release()
-                    if hasattr(self, 'cancel_capture'):
-                        self.cancel_capture()
-                    break
             if self.camera.isOpened():
                 self.camera.release()
             cv2.destroyAllWindows()
