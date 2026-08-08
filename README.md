@@ -8,6 +8,9 @@
 ## requirement for building
 - USB Camera
 - Arudino UNO (or any type that can do serial transmitting)
+- 1920x1080 FHD 24inch screen
+- Any step motor that can do 50kg/cm torque
+- 2 mini type conveyor
 
 ## recycling ui
 - set the display orientation to portrait at 1080 x 1920 before starting the application.
