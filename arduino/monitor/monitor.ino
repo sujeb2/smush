@@ -5,25 +5,34 @@
 #define CONV_B1 4
 #define CONV_B2 5
 
-#define CONV_SPEEDA 55
-#define CONV_SPEEDB 55
+#define CONV_SPEED 55
+#define CONV_FORWARD_FOR 5000
+
+// force
+#define MOTOR_STEP_A 7
+#define MOTOR_STEP_B 8
+#define MOTOR_PWM 9
 
 // serial
 #define SERIAL_BAUD 9600
 
-#include <libLM2575.h>
 #include <L298NX2.h>
 #include <string>
 #include <vector>
 #include <sstream>
 
 L298NX2 conveyor(CONV_A1, CONV_A2, CONV_B1, CONV_B2);
-conveyor.setSpeedA(CONV_SPEEDA);
-conveyor.setSpeedB(CONV_SPEEDB);
+
+conveyor.setSpeedA(CONV_SPEED);
+conveyor.setSpeedB(CONV_SPEED);
 
 void setup() {
   Serial.begin(SERIAL_BAUD);
   while(!Serial);
+  pinMode(MOTOR_STEP_A, OUTPUT);
+  pinMode(MOTOR_STEP_B, OUTPUT);
+  pinMode(MOTOR_PWM, OUTPUT);
+
   Serial.println("Serial Read start")
 }
 
@@ -31,16 +40,28 @@ void loop() {
   if(Serial.available()) {
     String read = Serial.readStringUntil('\n');
     if(read.find("obj_detect1")) { // expected obj1
-      int index = read.find("obj_detect1");
-
+      conveyor.forwardFor(CONV_FORWARD_FOR);
+      Serial.write("Forwarded");
     } else if(read.find("obj_detect2")) { // expected obj2
-      int index = read.find("obj_detect2");
-      
+      conveyor.forwardFor(CONV_FORWARD_FOR);
+      Serial.write("Forwarded");
     }
   }
-
 }
 
-void splitLine(string str) {
+void crusher_forward(int Speed) {
+     digitalWrite(IN1,HIGH);
+     digitalWrite(IN2,LOW);
+     analogWrite(PWM,Speed);
+}
 
+void crusher_backward(int Speed) {
+     digitalWrite(IN1,LOW);
+     digitalWrite(IN2,HIGH);
+     analogWrite(PWM,Speed);
+}
+
+void crusher_stop(){
+     digitalWrite(IN1,LOW);
+     digitalWrite(IN2,LOW);
 }
