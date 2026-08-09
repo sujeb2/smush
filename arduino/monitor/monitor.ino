@@ -44,7 +44,7 @@ void loop() {
       Serial.write("Forwarded");
     } else if(read.find("obj_detect2")) { // expected obj2
       conveyor.forwardFor(CONV_FORWARD_FOR);
-      Serial.write("Forwarded");
+      Serial.write("Forwarded_2");
     }
   }
 }

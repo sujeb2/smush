@@ -1,9 +1,13 @@
 import argparse
 import configparser
+import glob
 import math
 import os
+import queue
 import random
 import sys
+import textwrap
+import threading
 import time
 import tkinter as tk
 from datetime import datetime
@@ -32,9 +36,16 @@ class RecyclingUI:
         self.base = find_compiled_dir()
         self.serial = serial_io
         self.count = initial_count
-        self.serial_message = serial_message.lower()
+        if isinstance(serial_message, str):
+            serial_message = serial_message.split(",")
+        self.serial_messages = tuple(message.strip().lower() for message in serial_message if message.strip())
         self.serial_buffer = ""
         self.count_file = count_file
+        self.screen_state = "startup"
+        self.startup_text = "startup..."
+        self.error_code = ""
+        self.error_detail = ""
+        self.event_queue = queue.Queue()
         self.running = True
         self.animating = False
         self.pending_events = 0
@@ -63,9 +74,18 @@ class RecyclingUI:
         self.canvas = tk.Canvas(self.root, highlightthickness=0, bg="black")
         self.canvas.pack(fill="both", expand=True)
         self.font_path = os.path.join(self.base, "files", "fonts", "KERISKEDU_B.ttf")
+        self.novecento_font_path = self._find_font(
+            ("Novecentosanswide-Normal.otf", "NovecentoSansWide-Normal.otf", "*Novecento*Normal*"),
+            (os.path.join(os.path.expanduser("~"), "Library", "Fonts"),),
+        )
+        self.display_font_path = self._find_font(
+            ("*A2Z*", "*에이투지체-4Regular.ttf", "*에이투지체-4Regular.ttf"),
+            (os.path.join(os.path.expanduser("~"), "Library", "Fonts"),),
+        )
         self.ground_source = Image.open(os.path.join(self.base, "files", "img", "ground_layer.png")).convert("RGBA")
         self.trash_source = Image.open(os.path.join(self.base, "files", "img", "trash_can.png")).convert("RGBA")
         self.cans_source = Image.open(os.path.join(self.base, "files", "img", "cans.png")).convert("RGBA")
+        self.error_source = Image.open(os.path.join(self.base, "files", "img", "error_layer.png")).convert("RGBA")
         self.single_can_source = self.cans_source.crop((10, 8, 156, 184))
         self.root.bind("<Escape>", lambda event: self.close())
         self.root.bind("<space>", lambda event: self.trigger_recycle())
@@ -74,6 +94,7 @@ class RecyclingUI:
         self.canvas.bind("<Configure>", self._schedule_scene)
         self.root.after(0, self._build_scene)
         self.root.after(50, self._poll_serial)
+        self.root.after(50, self._poll_events)
 
     def run(self):
         self.root.mainloop()
@@ -86,8 +107,43 @@ class RecyclingUI:
             self.serial.close()
         self.root.destroy()
 
+    def post_startup(self, message):
+        self.event_queue.put(("startup", message))
+
+    def post_serial(self, serial_io):
+        self.event_queue.put(("serial", serial_io))
+
+    def post_ready(self):
+        self.event_queue.put(("ready",))
+
+    def post_error(self, code, detail):
+        self.event_queue.put(("error", code, detail))
+
+    def show_startup(self, message):
+        if self.screen_state == "error":
+            return
+        self.screen_state = "startup"
+        self.startup_text = message
+        self._build_scene()
+
+    def show_ready(self):
+        if self.screen_state == "error":
+            return
+        self.screen_state = "ready"
+        self._build_scene()
+
+    def show_error(self, code, detail):
+        if self.screen_state == "error":
+            return
+        self.screen_state = "error"
+        self.error_code = code
+        self.error_detail = "\n".join(textwrap.fill(line, width=58) for line in detail.splitlines())
+        self.animating = False
+        self.pending_events = 0
+        self._build_scene()
+
     def trigger_recycle(self):
-        if not self.running:
+        if not self.running or self.screen_state != "ready":
             return
         if self.animating:
             self.pending_events += 1
@@ -121,6 +177,12 @@ class RecyclingUI:
         self.canvas.delete("all")
         self.firework_particles.clear()
         self.firework_job = None
+        if self.screen_state == "startup":
+            self._build_startup_scene()
+            return
+        if self.screen_state == "error":
+            self._build_error_scene()
+            return
         self.canvas.create_rectangle(
             self._x(0),
             self._y(0),
@@ -147,6 +209,41 @@ class RecyclingUI:
         self.drop_photos = self._make_drop_photos()
         self.drop_id = self.canvas.create_image(self._x(540), self._y(-140), image=self.drop_photos[0], anchor="center", state="hidden", tags="drop")
 
+    def _build_startup_scene(self):
+        self.canvas.create_rectangle(
+            self._x(0),
+            self._y(0),
+            self._x(DESIGN_WIDTH),
+            self._y(DESIGN_HEIGHT),
+            fill="#080808",
+            outline="",
+            tags="startup",
+        )
+        self.startup_logo_photo = self._text_photo("smush v1.0", 42, font_path=self.novecento_font_path, align="left")
+        self.startup_lines_photo = self._text_photo(self.startup_text, 31, font_path=self.novecento_font_path, align="left")
+        self.canvas.create_image(self._x(48), self._y(58), image=self.startup_logo_photo, anchor="nw", tags="startup")
+        self.canvas.create_image(self._x(48), self._y(155), image=self.startup_lines_photo, anchor="nw", tags="startup")
+
+    def _build_error_scene(self):
+        self.error_photo = self._scaled_photo(self.error_source)
+        self.canvas.create_image(self._x(540), self._y(0), image=self.error_photo, anchor="n", tags="error")
+        self.error_title_photo = self._text_photo("ERROR CODE:", 46, font_path=self.novecento_font_path)
+        self.error_code_photo = self._text_photo(self.error_code, 34, font_path=self.display_font_path)
+        self.error_detail_photo = self._text_photo(self.error_detail, 25, font_path=self.novecento_font_path)
+        self.canvas.create_image(self._x(540), self._y(885), image=self.error_title_photo, anchor="n", tags="error")
+        self.canvas.create_image(self._x(540), self._y(955), image=self.error_code_photo, anchor="n", tags="error")
+        self.canvas.create_image(self._x(540), self._y(1020), image=self.error_detail_photo, anchor="n", tags="error")
+        self.canvas.tag_raise("error")
+
+    def _find_font(self, patterns, extra_directories):
+        directories = (os.path.join(self.base, "files", "fonts"), *extra_directories)
+        for directory in directories:
+            for pattern in patterns:
+                matches = sorted(glob.glob(os.path.join(directory, pattern)))
+                if matches:
+                    return matches[0]
+        return self.font_path
+
     def _scaled_photo(self, source):
         width = max(1, round(source.width * self.scale))
         height = max(1, round(source.height * self.scale))
@@ -161,24 +258,26 @@ class RecyclingUI:
             photos.append(ImageTk.PhotoImage(rotated.resize((target_width, target_height), Image.Resampling.LANCZOS)))
         return photos
 
-    def _text_photo(self, text, size, color="white"):
+    def _text_photo(self, text, size, color="white", font_path=None, align="center"):
         scaled_size = max(1, round(size * self.scale))
-        font = ImageFont.truetype(self.font_path, scaled_size)
+        font = ImageFont.truetype(font_path or self.font_path, scaled_size)
         if not text:
             return ImageTk.PhotoImage(Image.new("RGBA", (1, 1), (0, 0, 0, 0)))
-        box = font.getbbox(text, stroke_width=max(1, round(self.scale)))
-        width = max(1, box[2] - box[0] + round(12 * self.scale))
-        height = max(1, box[3] - box[1] + round(12 * self.scale))
+        probe = ImageDraw.Draw(Image.new("RGBA", (1, 1), (0, 0, 0, 0)))
+        spacing = max(4, round(16 * self.scale))
+        box = probe.multiline_textbbox((0, 0), text, font=font, spacing=spacing, align=align)
+        padding = max(4, math.ceil(8 * self.scale))
+        width = max(1, math.ceil(box[2] - box[0]) + padding * 2)
+        height = max(1, math.ceil(box[3] - box[1]) + padding * 2)
         image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(image)
-        draw.text(
-            (width / 2, height / 2),
+        draw.multiline_text(
+            (padding - box[0], padding - box[1]),
             text,
             font=font,
             fill=color,
-            anchor="mm",
-            stroke_width=max(1, round(self.scale)),
-            stroke_fill=color,
+            spacing=spacing,
+            align=align,
         )
         return ImageTk.PhotoImage(image)
 
@@ -298,6 +397,39 @@ class RecyclingUI:
         else:
             self.firework_job = None
 
+    def _poll_events(self):
+        if not self.running:
+            return
+        try:
+            while True:
+                event = self.event_queue.get_nowait()
+                if event[0] == "startup":
+                    self.show_startup(event[1])
+                elif event[0] == "serial":
+                    self.serial = event[1]
+                elif event[0] == "ready":
+                    self.show_ready()
+                elif event[0] == "error":
+                    self.show_error(event[1].upper(), event[2].upper())
+        except queue.Empty:
+            pass
+        self.root.after(50, self._poll_events)
+
+    def _consume_serial_messages(self, message):
+        self.serial_buffer += message.lower()
+        while True:
+            matches = []
+            for serial_message in self.serial_messages:
+                position = self.serial_buffer.find(serial_message)
+                if position >= 0:
+                    matches.append((position, serial_message))
+            if not matches:
+                break
+            position, serial_message = min(matches, key=lambda match: match[0])
+            self.serial_buffer = self.serial_buffer[position + len(serial_message):]
+            self.trigger_recycle()
+        self.serial_buffer = self.serial_buffer[-256:]
+
     def _poll_serial(self):
         if not self.running:
             return
@@ -307,15 +439,17 @@ class RecyclingUI:
                     message = self.serial.read()
                     if message is None:
                         continue
-                    self.serial_buffer += message.lower()
-                    while self.serial_message in self.serial_buffer:
-                        position = self.serial_buffer.index(self.serial_message)
-                        self.serial_buffer = self.serial_buffer[position + len(self.serial_message):]
-                        self.trigger_recycle()
-                    self.serial_buffer = self.serial_buffer[-256:]
+                    self._consume_serial_messages(message)
             except Exception as error:
                 timestamp = datetime.now().strftime("%H:%M:%S")
                 print(f"[{timestamp}] [UI] serial read failed: {error}")
+                failed_serial = self.serial
+                self.serial = None
+                try:
+                    failed_serial.close()
+                except Exception:
+                    pass
+                self.show_error("ARDUINO_CONNECTION_LOST", "CANNOT COMMUNICATE WITH ARDUINO.\nCHECK USB CABLE AND RESTART THE PROGRAM.")
         self.root.after(50, self._poll_serial)
 
     def _save_count(self):
@@ -357,25 +491,46 @@ def run_demo():
     parser.add_argument("--windowed", action="store_true")
     parser.add_argument("--count", type=int)
     parser.add_argument("--port")
+    parser.add_argument("--simulate-error", choices=("arduino", "webcam", "runtime"))
     args = parser.parse_args()
     config = _load_config()
     ui_config = config["UI"]
     initial_count = args.count if args.count is not None else ui_config.getint("InitialCount", fallback=0)
     count_file = os.path.join(find_compiled_dir(), ui_config.get("CountFile", fallback="files/recycle_count.txt"))
-    serial_io = None
     if not args.demo:
-        from serial_arduino import SerialIO
-
-        port = args.port or config["SERIAL"]["SerialPort"]
-        serial_io = SerialIO(port, config["SERIAL"]["SerialBaudrate"], config["SERIAL"].getint("SerialTimeout"))
         initial_count = _load_saved_count(count_file, initial_count)
     app = RecyclingUI(
-        serial_io=serial_io,
         initial_count=initial_count,
         fullscreen=not args.windowed,
         serial_message=ui_config.get("SerialMessage", fallback="Forwarded"),
         count_file=None if args.demo else count_file,
     )
+
+    def initialize():
+        app.post_startup("Initializing SMUSH interface...")
+        time.sleep(1.2)
+        if args.simulate_error == "arduino":
+            app.post_error("ARDUINO_CONNECTION_LOST", f"CANNOT COMMUNICATE WITH ARDUINO.\nCHECK USB CABLE AND RESTART THE PROGRAM.")
+            return
+        if args.simulate_error == "webcam":
+            app.post_error("WEBCAM_NOT_FOUND", f"CANNOT FIND COMPATIBLE WEBCAM.\nCHECK CONNECTION AND RESTART THE PROGRAM.")
+            return
+        if args.simulate_error == "runtime":
+            app.post_error("RUNTIME_FAILURE", f"UNEXPECTED ERROR HAS OCCURRED.\nCHECK ALL OF THE COMPONENTS CONNECTION\nCHECK INSTRUCTIONS FOR MORE INFORMATION.\nMORE INFORMATION IS PROVIDED IN THE CONSOLE, PLEASE RESTART THE MACHINE.")
+            return
+        if not args.demo:
+            from serial_arduino import SerialIO
+
+            port = args.port or config["SERIAL"]["SerialPort"]
+            try:
+                serial_io = SerialIO(port, config["SERIAL"]["SerialBaudrate"], config["SERIAL"].getint("SerialTimeout"))
+            except Exception as error:
+                app.post_error("ARDUINO_NOT_FOUND", f"CANNOT OPEN PORT IN {port}.\nIS THE PORT IS USED BY ANOTHER PROCESS?\n{error}")
+                return
+            app.post_serial(serial_io)
+        app.post_ready()
+
+    app.root.after(100, lambda: threading.Thread(target=initialize, daemon=True, name="smush-ui-initializer").start())
     app.run()
 
 

@@ -64,7 +64,7 @@ class Model:
 
     def liveFeedCapture(self): # live video feed
         try:
-            self.camera = cv2.VideoCapture(0)
+            self.camera = self.vc if self.vc.isOpened() else cv2.VideoCapture(0)
             target_fps = config['GENERIC'].getint('CameraFPS', fallback=480)*2
             self.camera.set(cv2.CAP_PROP_FPS, target_fps)
             wait_time_ms = int(1000 / target_fps) if target_fps > 0 else 1
@@ -75,8 +75,10 @@ class Model:
                     
                 if not ret or frame is None:
                     print(f"[{self.timestamp}] [ModelRecog] failed to grab frame from camera.")
-                    break
-                self.detections = self.model.predict(source=frame, conf=0.25, stream=True)
+                    self.camera.release()
+                    cv2.destroyAllWindows()
+                    return 1
+                self.detections = self.model.predict(source=frame, conf=0.5, stream=True)
                     
                 for result in self.detections:
                     annotated_frame = result.plot()
@@ -87,19 +89,21 @@ class Model:
                         print(f'[{self.timestamp}] [ModelRecog] confident: {self.confident}, names: {self.names}')
                         if(config['DETECTION']['ExpectedObject_1'] in self.names):
                             self.serial.write(f"obj1_detect[{config['DETECTION']['ExpectedObject_1']}]\n")
+                            self.camera.release()
+                            cv2.destroyAllWindows()
                             return 0
                         elif(config['DETECTION']['ExpectedObject_2'] in self.names):
                             self.serial.write(f"obj2_detect[{config['DETECTION']['ExpectedObject_2']}]\n")
+                            self.camera.release()
+                            cv2.destroyAllWindows()
                             return 0
                 key = cv2.waitKey(wait_time_ms) & 0xFF
                 if key == ord('q'):
                     self.camera.release()
                     if hasattr(self, 'cancel_capture'):
                         self.cancel_capture()
-                    break
-                if self.camera.isOpened():
-                    self.camera.release()
-                cv2.destroyAllWindows()
+                    cv2.destroyAllWindows()
+                    return None
         except Exception as e:
             print(f'[{self.timestamp}] [ModelRecog] Ultralytics error occurred. Using fallback imageai ({e})')
             self.execution_path = base
