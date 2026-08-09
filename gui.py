@@ -14,6 +14,8 @@ from datetime import datetime
 
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 
+from dependency_updater import DependencyUpdateError, load_requirements, requirement_name, update_dependencies
+
 
 DESIGN_WIDTH = 1080
 DESIGN_HEIGHT = 1920
@@ -41,7 +43,9 @@ class RecyclingUI:
         self.serial_messages = tuple(message.strip().lower() for message in serial_message if message.strip())
         self.serial_buffer = ""
         self.count_file = count_file
-        self.screen_state = "startup"
+        self.screen_state = "update"
+        self.update_progress = 0
+        self.update_status = "CHECKING DEPENDENCIES"
         self.startup_text = "startup..."
         self.error_code = ""
         self.error_detail = ""
@@ -86,6 +90,7 @@ class RecyclingUI:
         self.trash_source = Image.open(os.path.join(self.base, "files", "img", "trash_can.png")).convert("RGBA")
         self.cans_source = Image.open(os.path.join(self.base, "files", "img", "cans.png")).convert("RGBA")
         self.error_source = Image.open(os.path.join(self.base, "files", "img", "error_layer.png")).convert("RGBA")
+        self.update_source = Image.open(os.path.join(self.base, "files", "img", "update_layer.png")).convert("RGBA")
         self.single_can_source = self.cans_source.crop((10, 8, 156, 184))
         self.root.bind("<Escape>", lambda event: self.close())
         self.root.bind("<space>", lambda event: self.trigger_recycle())
@@ -110,6 +115,9 @@ class RecyclingUI:
     def post_startup(self, message):
         self.event_queue.put(("startup", message))
 
+    def post_update(self, progress, status):
+        self.event_queue.put(("update", progress, status))
+
     def post_serial(self, serial_io):
         self.event_queue.put(("serial", serial_io))
 
@@ -124,6 +132,14 @@ class RecyclingUI:
             return
         self.screen_state = "startup"
         self.startup_text = message
+        self._build_scene()
+
+    def show_update(self, progress, status):
+        if self.screen_state == "error":
+            return
+        self.screen_state = "update"
+        self.update_progress = max(0, min(100, round(progress)))
+        self.update_status = status
         self._build_scene()
 
     def show_ready(self):
@@ -177,6 +193,9 @@ class RecyclingUI:
         self.canvas.delete("all")
         self.firework_particles.clear()
         self.firework_job = None
+        if self.screen_state == "update":
+            self._build_update_scene()
+            return
         if self.screen_state == "startup":
             self._build_startup_scene()
             return
@@ -223,6 +242,26 @@ class RecyclingUI:
         self.startup_lines_photo = self._text_photo(self.startup_text, 31, font_path=self.novecento_font_path, align="left")
         self.canvas.create_image(self._x(48), self._y(58), image=self.startup_logo_photo, anchor="nw", tags="startup")
         self.canvas.create_image(self._x(48), self._y(155), image=self.startup_lines_photo, anchor="nw", tags="startup")
+
+    def _build_update_scene(self):
+        self.update_photo = self._scaled_photo(self.update_source)
+        self.canvas.create_image(self._x(540), self._y(0), image=self.update_photo, anchor="n", tags="update")
+        fill_width = 304 * self.update_progress / 100
+        self.canvas.create_rectangle(
+            self._x(370),
+            self._y(1148),
+            self._x(370 + fill_width),
+            self._y(1182),
+            fill="#28C68D",
+            outline="",
+            tags="update",
+        )
+        self.update_status_photo = self._text_photo(self.update_status, 42, font_path=self.display_font_path)
+        self.update_count_photo = self._text_photo(f"{self.update_progress}/100", 25, font_path=self.novecento_font_path)
+        self.update_percent_photo = self._text_photo(f"{self.update_progress}%", 25, font_path=self.novecento_font_path)
+        self.canvas.create_image(self._x(540), self._y(920), image=self.update_status_photo, anchor="n", tags="update")
+        self.canvas.create_image(self._x(430), self._y(1200), image=self.update_count_photo, anchor="n", tags="update")
+        self.canvas.create_image(self._x(650), self._y(1200), image=self.update_percent_photo, anchor="n", tags="update")
 
     def _build_error_scene(self):
         self.error_photo = self._scaled_photo(self.error_source)
@@ -403,7 +442,9 @@ class RecyclingUI:
         try:
             while True:
                 event = self.event_queue.get_nowait()
-                if event[0] == "startup":
+                if event[0] == "update":
+                    self.show_update(event[1], event[2])
+                elif event[0] == "startup":
                     self.show_startup(event[1])
                 elif event[0] == "serial":
                     self.serial = event[1]
@@ -491,7 +532,8 @@ def run_demo():
     parser.add_argument("--windowed", action="store_true")
     parser.add_argument("--count", type=int)
     parser.add_argument("--port")
-    parser.add_argument("--simulate-error", choices=("arduino", "webcam", "runtime"))
+    parser.add_argument("--simulate-error", choices=("dependency", "arduino", "webcam", "runtime"))
+    parser.add_argument("--skip-update", action="store_true")
     args = parser.parse_args()
     config = _load_config()
     ui_config = config["UI"]
@@ -507,6 +549,36 @@ def run_demo():
     )
 
     def initialize():
+        try:
+            update_config = config["UPDATE"]
+            if args.skip_update or not update_config.getboolean("Enabled", fallback=True):
+                app.post_update(100, "UPDATE SKIPPED")
+                time.sleep(0.4)
+            elif args.demo:
+                requirements = load_requirements(os.path.join(find_compiled_dir(), "requirements.txt"))
+                total = max(1, len(requirements))
+                app.post_update(0, "CHECKING DEPENDENCIES")
+                for index, requirement in enumerate(requirements):
+                    if args.simulate_error == "dependency" and index == max(1, total // 2):
+                        raise DependencyUpdateError(f"{requirement_name(requirement)} update failed")
+                    app.post_update(round(index / total * 100), f"UPDATING {requirement_name(requirement).upper()}")
+                    time.sleep(0.1)
+                    app.post_update(round((index + 1) / total * 100), f"{requirement_name(requirement).upper()} UPDATED")
+                app.post_update(100, "UPDATE COMPLETE")
+                time.sleep(0.4)
+            else:
+                update_dependencies(
+                    os.path.join(find_compiled_dir(), "requirements.txt"),
+                    app.post_update,
+                    timeout=update_config.getint("Timeout", fallback=900),
+                )
+                time.sleep(0.4)
+        except Exception as error:
+            app.post_error(
+                "DEPENDENCY_UPDATE_FAILED",
+                f"CANNOT UPDATE REQUIRED DEPENDENCIES.\nCHECK NETWORK CONNECTION AND PYTHON PERMISSIONS.\n{error}",
+            )
+            return
         app.post_startup("Initializing SMUSH interface...")
         time.sleep(1.2)
         if args.simulate_error == "arduino":

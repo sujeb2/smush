@@ -10,7 +10,6 @@ if pyenv versions | grep -q "3.11.15"; then
     [[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
     eval "$(pyenv init - zsh)"
     pyenv shell 3.11.15
-    pip install -r requirements.txt
     python main.py
 else
     echo "Python 3.11.15 is required to run this program, please install by running: pyenv install 3.11.15"

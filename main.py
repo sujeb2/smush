@@ -6,6 +6,7 @@ import threading
 import time
 from datetime import datetime
 
+from dependency_updater import DependencyUpdateError, load_requirements, requirement_name, update_dependencies
 from gui import RecyclingUI
 from serial_arduino import SerialIO
 
@@ -61,12 +62,51 @@ class Main:
             count_file=None if self.args.demo else count_file,
         )
         self.ui.root.after(100, self._start_initialization)
-        print(f"[{self.timestamp}] [main] ui startup screen visible")
+        print(f"[{self.timestamp}] [main] ui dependency update screen visible")
         self.ui.run()
 
     def _start_initialization(self):
-        initializer = threading.Thread(target=self._initialize_components, daemon=True, name="smush-initializer")
+        initializer = threading.Thread(target=self._startup_sequence, daemon=True, name="smush-initializer")
         initializer.start()
+
+    def _startup_sequence(self):
+        try:
+            update_config = config["UPDATE"]
+            update_enabled = update_config.getboolean("Enabled", fallback=True) and not self.args.skip_update
+            if not update_enabled:
+                self.ui.post_update(100, "UPDATE SKIPPED")
+                time.sleep(0.4)
+            elif self.args.demo:
+                requirements = load_requirements(os.path.join(base, "requirements.txt"))
+                total = max(1, len(requirements))
+                self.ui.post_update(0, "CHECKING DEPENDENCIES")
+                for index, requirement in enumerate(requirements):
+                    if self.args.simulate_error == "dependency" and index == max(1, total // 2):
+                        raise DependencyUpdateError(f"{requirement_name(requirement)} update failed")
+                    self.ui.post_update(round(index / total * 100), f"UPDATING {requirement_name(requirement).upper()}")
+                    time.sleep(0.1)
+                    self.ui.post_update(round((index + 1) / total * 100), f"{requirement_name(requirement).upper()} UPDATED")
+                self.ui.post_update(100, "UPDATE COMPLETE")
+                time.sleep(0.4)
+            else:
+                update_dependencies(
+                    os.path.join(base, "requirements.txt"),
+                    self._dependency_progress,
+                    timeout=update_config.getint("Timeout", fallback=900),
+                )
+                time.sleep(0.4)
+        except Exception as error:
+            self.ui.post_error(
+                "DEPENDENCY_UPDATE_FAILED",
+                f"CANNOT UPDATE REQUIRED DEPENDENCIES.\nCHECK NETWORK CONNECTION AND PYTHON PERMISSIONS.\n{error}",
+            )
+            return
+        self._initialize_components()
+
+    def _dependency_progress(self, progress, status):
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        print(f"[{timestamp}] [updater] {progress}% {status}")
+        self.ui.post_update(progress, status)
 
     def _initialize_components(self):
         started = time.monotonic()
@@ -79,7 +119,7 @@ class Main:
             print(f"[{timestamp}] [main] {message}")
 
         try:
-            status("Initializing SMUSH interface...")
+            status("start smush interface...")
             os.makedirs(os.path.join(base, "files", "captures"), exist_ok=True)
             if self.args.demo:
                 status("Demo mode enabled.")
@@ -205,7 +245,8 @@ def parse_args():
     parser.add_argument("--windowed", action="store_true")
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--count", type=int)
-    parser.add_argument("--simulate-error", choices=("arduino", "webcam", "runtime"))
+    parser.add_argument("--simulate-error", choices=("dependency", "arduino", "webcam", "runtime"))
+    parser.add_argument("--skip-update", action="store_true")
     return parser.parse_args()
 
 
