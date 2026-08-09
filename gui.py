@@ -82,6 +82,10 @@ class RecyclingUI:
             ("Novecentosanswide-Normal.otf", "NovecentoSansWide-Normal.otf", "*Novecento*Normal*"),
             (os.path.join(os.path.expanduser("~"), "Library", "Fonts"),),
         )
+        self.novecento_demibold_font_path = self._find_font(
+            ("Novecentosanswide-DemiBold.otf", "NovecentoSansWide-DemiBold.otf", "*Novecento*DemiBold*"),
+            (os.path.join(os.path.expanduser("~"), "Library", "Fonts"),),
+        )
         self.display_font_path = self._find_font(
             ("*A2Z*", "*에이투지체-4Regular.ttf", "*에이투지체-4Regular.ttf"),
             (os.path.join(os.path.expanduser("~"), "Library", "Fonts"),),
@@ -256,7 +260,7 @@ class RecyclingUI:
             outline="",
             tags="update",
         )
-        self.update_status_photo = self._text_photo(self.update_status, 42, font_path=self.display_font_path)
+        self.update_status_photo = self._text_photo(self.update_status, 42, font_path=self.novecento_demibold_font_path)
         self.update_count_photo = self._text_photo(f"{self.update_progress}/100", 25, font_path=self.novecento_font_path)
         self.update_percent_photo = self._text_photo(f"{self.update_progress}%", 25, font_path=self.novecento_font_path)
         self.canvas.create_image(self._x(540), self._y(920), image=self.update_status_photo, anchor="n", tags="update")
