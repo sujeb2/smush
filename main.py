@@ -9,6 +9,7 @@ from datetime import datetime
 from dependency_updater import DependencyUpdateError, load_requirements, requirement_name, update_dependencies
 from gui import RecyclingUI
 from serial_arduino import SerialIO
+from test_mode import TestModeUI
 
 
 def find_compiled_dir():
@@ -38,13 +39,64 @@ class Main:
         self.args = args
         print(f"[{self.timestamp}] [main] smush starting, config loaded: {config.sections()}")
         print(f"[{self.timestamp}] [main] model path: {config['GENERIC']['ModelPath']}")
-        if self._ui_enabled():
+        if self._test_mode_enabled():
+            self._run_test_mode()
+        elif self._ui_enabled():
             self._run_ui()
         else:
             self._run_headless()
 
+    def _test_mode_enabled(self):
+        return not self.args.headless and (
+            self.args.test_mode or config.getboolean("TEST_MODE", "Enabled", fallback=False)
+        )
+
     def _ui_enabled(self):
         return not self.args.headless and config["UI"].getboolean("Enabled", fallback=True)
+
+    def _run_test_mode(self):
+        fullscreen = config["UI"].getboolean("Fullscreen", fallback=True) and not self.args.windowed
+        self.ui = TestModeUI(
+            os.path.join(base, "files", "main_conf.ini"),
+            os.path.join(base, "files", "model_conf.ini"),
+            fullscreen=fullscreen,
+            restart_callback=self._restart_program,
+        )
+        self.ui.root.after(100, self._start_test_mode_serial)
+        print(f"[{self.timestamp}] [main] test mode visible")
+        self.ui.run()
+
+    def _start_test_mode_serial(self):
+        if self.args.demo:
+            self.ui.post_status("DEMO MODE: KEYBOARD READY")
+            return
+        if config["GENERIC"].getboolean("SkipSerialCheck"):
+            self.ui.post_status("ARDUINO CHECK SKIPPED: KEYBOARD READY")
+            return
+        connector = threading.Thread(target=self._connect_test_mode_serial, daemon=True, name="smush-test-serial")
+        connector.start()
+
+    def _connect_test_mode_serial(self):
+        try:
+            self.serial = SerialIO(
+                config["SERIAL"]["SerialPort"],
+                config["SERIAL"]["SerialBaudrate"],
+                timeout=config["SERIAL"].getint("SerialTimeout"),
+            )
+        except Exception as error:
+            self.ui.post_status(f"ARDUINO UNAVAILABLE: {error}")
+            return
+        self.ui.post_serial(self.serial)
+
+    def _restart_program(self):
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        print(f"[{timestamp}] [main] RESET received, restarting smush")
+        if self.ui.serial is not None:
+            self.ui.serial.close()
+        arguments = [sys.executable, *sys.argv]
+        if getattr(sys, "frozen", False):
+            arguments = [sys.executable, *sys.argv[1:]]
+        os.execv(sys.executable, arguments)
 
     def _run_ui(self):
         ui_config = config["UI"]
@@ -247,6 +299,7 @@ def parse_args():
     parser.add_argument("--count", type=int)
     parser.add_argument("--simulate-error", choices=("dependency", "arduino", "webcam", "runtime"))
     parser.add_argument("--skip-update", action="store_true")
+    parser.add_argument("--test-mode", action="store_true")
     return parser.parse_args()
 
 
