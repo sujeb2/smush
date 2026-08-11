@@ -94,8 +94,20 @@ class Main:
         if self.ui.serial is not None:
             self.ui.serial.close()
         arguments = [sys.executable, *sys.argv]
-        if getattr(sys, "frozen", False):
+        if "__compiled__" in globals() or getattr(sys, "frozen", False):
             arguments = [sys.executable, *sys.argv[1:]]
+        os.execv(sys.executable, arguments)
+
+    def _enter_test_mode(self):
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        print(f"[{timestamp}] [main] test input received, opening test mode")
+        if self.ui.serial is not None:
+            self.ui.serial.close()
+        arguments = [sys.executable, *sys.argv]
+        if "__compiled__" in globals() or getattr(sys, "frozen", False):
+            arguments = [sys.executable, *sys.argv[1:]]
+        if "--test-mode" not in arguments:
+            arguments.append("--test-mode")
         os.execv(sys.executable, arguments)
 
     def _run_ui(self):
@@ -112,6 +124,7 @@ class Main:
             fullscreen=fullscreen,
             serial_message=ui_config.get("SerialMessage", fallback="Forwarded"),
             count_file=None if self.args.demo else count_file,
+            test_mode_callback=self._enter_test_mode,
         )
         self.ui.root.after(100, self._start_initialization)
         print(f"[{self.timestamp}] [main] ui dependency update screen visible")

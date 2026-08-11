@@ -18,6 +18,8 @@
 
 #define TEST_UP_SW 11
 #define TEST_DOWN_SW 12
+#define TEST_UP_SW_LED 13
+#define TEST_DOWN_SW_LED 14
 
 #include <L298NX2.h>
 
@@ -41,8 +43,11 @@ void setup() {
   pinMode(MOTOR_STEP_A, OUTPUT);
   pinMode(MOTOR_STEP_B, OUTPUT);
   pinMode(MOTOR_PWM, OUTPUT);
+
   pinMode(TEST_UP_SW, INPUT_PULLUP);
   pinMode(TEST_DOWN_SW, INPUT_PULLUP);
+  pinMode(TEST_UP_SW_LED, OUTPUT);
+  pinMode(TEST_DOWN_SW_LED, OUTPUT);
 
   Serial.println("read start");
 }
@@ -78,13 +83,15 @@ void loop() {
       pendingSwitch = 0;
     }
     if(!resetSent && millis() - pressStartTime >= requiredPressTime) {
-      Serial.println("RESET");
+      sw_both_led_blink(TEST_UP_SW_LED, TEST_DOWN_SW_LED, 3, 1000)
+      Serial.write("RESET");
       resetSent = true;
     }
   } else if(buttonPressed) {
     if(!upPressed && !downPressed) {
       if(!resetSent) {
-        Serial.println("test_back");
+        sw_both_led_blink(TEST_UP_SW_LED, TEST_DOWN_SW_LED, 4, 100)
+        Serial.write("test_back");
       }
       buttonPressed = false;
       resetSent = false;
@@ -96,9 +103,9 @@ void loop() {
     singlePressStartTime = millis();
   } else if(pendingSwitch != 3 && millis() - singlePressStartTime >= singlePressDelay) {
     if(pendingSwitch == 1 && upPressed) {
-      Serial.println("test_up");
+      Serial.write("test_up");
     } else if(pendingSwitch == 2 && downPressed) {
-      Serial.println("test_down");
+      Serial.write("test_down");
     }
     pendingSwitch = 3;
   }
@@ -121,4 +128,28 @@ void crusher_stop(){
   digitalWrite(MOTOR_STEP_A,LOW);
   digitalWrite(MOTOR_STEP_B,LOW);
   analogWrite(MOTOR_PWM,0);
+}
+
+void sw_led_blink(int pin, int sec, int dy) {
+  unsigned long startTime = millis();
+  while (millis() - startTime < sec*1000) {
+    digitalWrite(pin, HIGH);
+    delay(dy);
+    digitalWrite(pin, LOW);
+    delay(dy);
+  }
+  delay(500);
+}
+
+void sw_both_led_blink(int pin, int pin2,int sec, int dy) {
+  unsigned long startTime = millis();
+  while (millis() - startTime < sec*1000) {
+    digitalWrite(pin, HIGH);
+    digitalWrite(pin2, HIGH);
+    delay(dy);
+    digitalWrite(pin, LOW);
+    digitalWrite(pin2, LOW);
+    delay(dy);
+  }
+  delay(500);
 }
