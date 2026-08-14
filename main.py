@@ -11,17 +11,14 @@ from gui import RecyclingUI
 from serial_arduino import SerialIO
 from test_mode import TestModeUI
 
-
 def find_compiled_dir():
     if "__compiled__" in globals():
         return os.path.dirname(os.path.abspath(sys.argv[0]))
     return os.path.dirname(os.path.abspath(__file__))
 
-
 base = find_compiled_dir()
 config = configparser.ConfigParser()
 config.read(os.path.join(base, "files", "main_conf.ini"), encoding="utf-8")
-
 
 def load_count(path, fallback):
     try:
@@ -29,7 +26,6 @@ def load_count(path, fallback):
             return int(file.read().strip())
     except (OSError, ValueError):
         return fallback
-
 
 class Main:
     def __init__(self, args):
@@ -212,7 +208,7 @@ class Main:
                 except Exception as error:
                     self.ui.post_error(
                         "ARDUINO_NOT_FOUND",
-                        f"CANNOT OPEN PORT IN {config['SERIAL']['SerialPort']}.\nIS THE PORT IS USED BY ANOTHER PROCESS?\n{error}",
+                        f"CANNOT OPEN PORT IN {config['SERIAL']['SerialPort']}.\n{error}",
                     )
                     return
                 self.ui.post_serial(self.serial)
@@ -303,7 +299,6 @@ class Main:
             print(f"[{self.timestamp}] [main] Error occurred while checking capture file limit. (OSError)")
             print(f"[{self.timestamp}] [main] Detailed log: {error}")
 
-
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--demo", action="store_true")
@@ -314,7 +309,6 @@ def parse_args():
     parser.add_argument("--skip-update", action="store_true")
     parser.add_argument("--test-mode", action="store_true")
     return parser.parse_args()
-
 
 if __name__ == "__main__":
     Main(parse_args())
