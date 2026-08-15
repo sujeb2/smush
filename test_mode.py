@@ -123,7 +123,7 @@ class ConfigRepository:
     def _load(self):
         main = self._read(self.main_path)
         model = self._read(self.model_path)
-        self._add_sections("GENERIC SETUP", self.main_path, main, ("GENERIC", "UI", "UPDATE", "TEST_MODE"))
+        self._add_sections("GENERIC SETUP", self.main_path, main, ("GENERIC", "UI", "UPDATE", "TEST_MODE", "MINIGAME"))
         self._add_sections("SERIAL SETUP", self.main_path, main, ("SERIAL",), "APP")
         self._add_sections("SERIAL SETUP", self.model_path, model, ("SERIAL",), "MODEL")
         self._add_sections("MOTOR SETUP", self.main_path, main, ("MOTOR",))

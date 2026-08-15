@@ -176,6 +176,7 @@ dmypy.json
 # Pyre type checker
 .pyre/
 files/captures/
+game/minigame_progress.json
 
 # pytype static type analyzer
 .pytype/

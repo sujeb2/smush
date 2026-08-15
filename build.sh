@@ -12,7 +12,7 @@ if pyenv versions | grep -q "3.11.15"; then
     eval "$(pyenv init - bash)"
     export PYENV_VERSION="3.11.15"
     python -m pip install -r requirements.txt
-    python -m nuitka --standalone --include-data-dir=files=files --include-data-files=requirements.txt=requirements.txt --static-libpython=no main.py
+    python -m nuitka --standalone --include-data-dir=files=files --include-data-dir=game=game --include-data-files=requirements.txt=requirements.txt --static-libpython=no main.py
 	echo "build done."
 else
     echo "Python 3.11.15 is required to run this program, please install by running: pyenv install 3.11.15"

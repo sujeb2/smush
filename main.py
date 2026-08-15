@@ -8,6 +8,7 @@ from datetime import datetime
 
 from dependency_updater import DependencyUpdateError, load_requirements, requirement_name, update_dependencies
 from gui import RecyclingUI
+from game.minigame import MinigameUI
 from serial_arduino import SerialIO
 from test_mode import TestModeUI
 
@@ -35,7 +36,9 @@ class Main:
         self.args = args
         print(f"[{self.timestamp}] [main] smush starting, config loaded: {config.sections()}")
         print(f"[{self.timestamp}] [main] model path: {config['GENERIC']['ModelPath']}")
-        if self._test_mode_enabled():
+        if self._minigame_enabled():
+            self._run_minigame()
+        elif self._test_mode_enabled():
             self._run_test_mode()
         elif self._ui_enabled():
             self._run_ui()
@@ -46,6 +49,45 @@ class Main:
         return not self.args.headless and (
             self.args.test_mode or config.getboolean("TEST_MODE", "Enabled", fallback=False)
         )
+
+    def _minigame_enabled(self):
+        return not self.args.headless and (
+            self.args.minigame or config.getboolean("MINIGAME", "Enabled", fallback=False)
+        )
+
+    def _run_minigame(self):
+        fullscreen = config["UI"].getboolean("Fullscreen", fallback=True) and not self.args.windowed
+        progress_file = config.get("MINIGAME", "ProgressFile", fallback="game/minigame_progress.json")
+        self.ui = MinigameUI(
+            os.path.join(base, "files", "main_conf.ini"),
+            fullscreen=fullscreen,
+            progress_path=os.path.join(base, progress_file),
+        )
+        self.ui.root.after(100, self._start_minigame_serial)
+        print(f"[{self.timestamp}] [main] minigame visible")
+        self.ui.run()
+
+    def _start_minigame_serial(self):
+        if self.args.demo:
+            self.ui.post_status("demo mode: keyboard input ready")
+            return
+        if config["GENERIC"].getboolean("SkipSerialCheck"):
+            self.ui.post_status("Arduino check skipped: keyboard input ready")
+            return
+        connector = threading.Thread(target=self._connect_minigame_serial, daemon=True, name="smush-minigame-serial")
+        connector.start()
+
+    def _connect_minigame_serial(self):
+        try:
+            self.serial = SerialIO(
+                config["SERIAL"]["SerialPort"],
+                config["SERIAL"]["SerialBaudrate"],
+                timeout=config["SERIAL"].getint("SerialTimeout"),
+            )
+        except Exception as error:
+            self.ui.post_status(f"Arduino unavailable: {error}")
+            return
+        self.ui.post_serial(self.serial)
 
     def _ui_enabled(self):
         return not self.args.headless and config["UI"].getboolean("Enabled", fallback=True)
@@ -308,6 +350,7 @@ def parse_args():
     parser.add_argument("--simulate-error", choices=("dependency", "arduino", "webcam", "runtime"))
     parser.add_argument("--skip-update", action="store_true")
     parser.add_argument("--test-mode", action="store_true")
+    parser.add_argument("--minigame", action="store_true")
     return parser.parse_args()
 
 if __name__ == "__main__":

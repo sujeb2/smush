@@ -8,3 +8,4 @@ torchvision
 ultralytics
 imageai
 nuitka
+pygame
