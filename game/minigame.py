@@ -107,7 +107,7 @@ class AudioPlayer:
 
     def _print(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S")
-        print(f"[{timestamp}] [Minigame] {message}")
+        print(f"[{timestamp}] [minigame] {message}")
 
     def play(self, path, loop=False, fade_ms=0):
         self.stop()
