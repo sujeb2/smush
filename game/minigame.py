@@ -191,6 +191,8 @@ class MinigameUI(CanvasUIFramework):
         self.scene_started = time.monotonic()
         self.animation_epoch = self.scene_started
         self.select_deadline = 0.0
+        self.entry_deadline = 0.0
+        self.warning_deadline = 0.0
         self.result_deadline = 0.0
         self.result_unlock_at = 0.0
         self.result_transition_target = None
@@ -200,6 +202,7 @@ class MinigameUI(CanvasUIFramework):
         self.ending_audio_started = False
         self.fade_started = None
         self.title_fade_started = None
+        self.entry_title_fade_started = None
         self.result_fade_started = None
         self.ending_fade_in_started = None
         self.event_queue = queue.Queue()
@@ -217,6 +220,8 @@ class MinigameUI(CanvasUIFramework):
         self.result_time_item = None
         self.select_time_item = None
         self.select_time_shown = None
+        self.entry_time_item = None
+        self.entry_time_shown = None
         self.result_time_shown = None
         self.fade_item = None
         self.fade_photo_cache = {}
@@ -264,8 +269,23 @@ class MinigameUI(CanvasUIFramework):
         self.selection_scroll_started = None
         self.selection_old_offset = 0.0
         self.selection_new_offset = 0.0
+        self.selection_old_x = 0.0
+        self.selection_new_x = 0.0
         self.selection_scroll_swapped = False
         self.selection_heading_item = None
+        self.selection_sweep_item = None
+        self.select_morph_in_started = None
+        self.select_morph_in_offset = 0.0
+        self.down_button_item = None
+        self.down_button_base_y = 1820.0
+        self.entry_card_item = None
+        self.entry_card_frames = ()
+        self.entry_card_frame_shown = -1
+        self.entry_card_source_frames = ()
+        self.warning_item = None
+        self.warning_frames = ()
+        self.warning_frame_shown = -1
+        self.warning_source_frames = ()
         self.next_arrow_items = []
         self.next_arrow_frames = ()
         self.result_card_offset = 0.0
@@ -277,6 +297,12 @@ class MinigameUI(CanvasUIFramework):
         self.result_values_shown = {}
         self.judgement_frames = {}
         self.result_final_counts = {key: 0 for key in JUDGEMENT_WEIGHT}
+        self.result_select_morph_started = None
+        self.result_select_card_offset = 0.0
+        self.result_morph_item = None
+        self.result_morph_frames = ()
+        self.result_morph_frame_shown = -1
+        self.result_morph_source_frames = ()
         self.transition_phase = None
         self.transition_started = 0.0
         self.curtain_items = ()
@@ -312,8 +338,11 @@ class MinigameUI(CanvasUIFramework):
             "title_logo": ("generic", "title_logo.png"),
             "network": ("generic", "network.png"),
             "scroll": ("generic", "scroll_bg_part.png"),
+            "entry": ("generic", "entry.png"),
+            "warning": ("generic", "warn.png"),
             "select_bg": ("music_select", "select_music_bg.png"),
             "select_icon": ("music_select", "select_icon.png"),
+            "down_button": ("music_select", "down_bt.png"),
             "previous": ("music_select", "prev_music.png"),
             "next_arrow": ("music_select", "next_arrow.png"),
             "main_layer": ("game", "main_layer.png"),
@@ -339,7 +368,18 @@ class MinigameUI(CanvasUIFramework):
         gradient.putpixel((0, 1), (198, 158, 244, 255))
         self.sources["top_gradient"] = gradient.resize((DESIGN_WIDTH, 520), Image.Resampling.BILINEAR)
         self.sources["next_arrow_left"] = self.sources["next_arrow"].transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        sweep = Image.new("RGBA", (150, self.sources["select_bg"].height), (255, 255, 255, 0))
+        sweep_pixels = sweep.load()
+        for x in range(sweep.width):
+            distance = abs(x - sweep.width / 2) / (sweep.width / 2)
+            alpha = round(105 * max(0.0, 1.0 - distance) ** 2)
+            for y in range(sweep.height):
+                sweep_pixels[x, y] = (248, 226, 255, alpha)
+        self.sources["select_sweep"] = sweep
         self.bgm_root = os.path.join(self.base, "game", "bgm")
+        self.select_bgm = "music_select.mp3"
+        if not os.path.isfile(os.path.join(self.bgm_root, self.select_bgm)):
+            self.select_bgm = os.path.join("finale", "music_select.mp3")
 
     def _print(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -362,12 +402,21 @@ class MinigameUI(CanvasUIFramework):
             self.press_button(1)
 
     def press_button(self, lane):
-        if not self.running or self.transition_phase is not None:
+        if not self.running or self.transition_phase is not None or self.entry_title_fade_started is not None:
             return
         if self.scene == "title":
-            self.start_title_select_morph()
+            self.show_entry()
+        elif self.scene == "entry":
+            if lane == 0:
+                self.show_warning()
+            else:
+                self._start_entry_title_transition()
         elif self.scene == "select":
-            if self.select_fade_in_started is not None or self.selection_scroll_started is not None:
+            if (
+                self.select_fade_in_started is not None
+                or self.select_morph_in_started is not None
+                or self.selection_scroll_started is not None
+            ):
                 return
             if lane == 0:
                 self._cycle_selection()
@@ -407,6 +456,8 @@ class MinigameUI(CanvasUIFramework):
         self.track = self.song_groups[self.song_index][0]
         if self.selection_heading_item is not None:
             self.canvas.itemconfigure(self.selection_heading_item, image=self._text("DIFFICULTY SELECT", 54))
+        self.canvas.delete("select_shell")
+        self._build_selection_shell(("select", "select_shell"))
         self._finish_selection_scroll_setup()
         self._print(f"difficulty select visible, song: {self.track.title}")
 
@@ -415,18 +466,24 @@ class MinigameUI(CanvasUIFramework):
         self.canvas.dtag("select_old", "select_list")
 
     def _finish_selection_scroll_setup(self):
-        self._build_selection_list(("select", "select_list", "select_new"))
+        self._build_selection_list(("select", "select_list", "select_dynamic", "select_new"))
         self.selection_scroll_started = time.monotonic()
         self.selection_old_offset = 0.0
         self.selection_new_offset = 180.0
+        self.selection_old_x = 0.0
+        self.selection_new_x = 250.0
         self.selection_scroll_swapped = False
-        self.canvas.move("select_new", 0, self.selection_new_offset * self.scale)
+        self.canvas.move(
+            "select_new", self.selection_new_x * self.scale, self.selection_new_offset * self.scale,
+        )
         self.canvas.itemconfigure("select_new", state="hidden")
+        self._create_selection_sweep()
 
     def show_title(self, fade_in=False):
         self.scene = "title"
         self.fade_started = None
         self.title_fade_started = None
+        self.entry_title_fade_started = None
         self.result_fade_started = None
         self.ending_fade_in_started = None
         self.select_fade_in_started = None
@@ -439,19 +496,58 @@ class MinigameUI(CanvasUIFramework):
         self.root.after(80, lambda: self._play_scene_audio("title", "title.mp3", loop=True, fade_ms=500))
         self._print(f"title visible, mode: {self.settings['mode']}, track: {self._track_key()}")
 
-    def show_select(self, fade_in=False):
+    def show_entry(self):
+        self.scene = "entry"
+        self.entry_title_fade_started = None
+        self.entry_deadline = time.monotonic() + 20.0
+        self._build_scene()
+        self.scene_started = time.monotonic()
+        self.entry_deadline = self.scene_started + 20.0
+        self.root.after(80, self._play_entry_audio)
+        self._print("entry visible, guest play only")
+
+    def _play_entry_audio(self):
+        if self.running and self.scene in ("entry", "warning"):
+            self.audio.play(os.path.join(self.bgm_root, "Entry.mp3"), loop=True, fade_ms=320)
+
+    def _start_entry_title_transition(self):
+        if self.scene != "entry" or self.entry_title_fade_started is not None:
+            return
+        self.entry_title_fade_started = time.monotonic()
+        self.audio.stop(650)
+        self._create_fade_overlay(0.0)
+        self._print("entry to title fade started")
+
+    def show_warning(self):
+        if self.scene != "entry":
+            return
+        self.scene = "warning"
+        self._build_scene()
+        self.scene_started = time.monotonic()
+        self.warning_deadline = self.scene_started + 3.0
+        self._print("warning visible, duration: 3 seconds")
+
+    def show_select(self, fade_in=False, morph_in=False):
         self.scene = "select"
         self.result_fade_started = None
+        self.result_select_morph_started = None
         self.result_transition_target = None
+        self.select_morph_in_started = None
+        self.select_morph_in_offset = 0.0
         self.select_deadline = time.monotonic() + self.settings["select_seconds"]
         self.select_fade_in_started = None
         self._build_scene()
         self.scene_started = time.monotonic()
         self.select_deadline = self.scene_started + self.settings["select_seconds"]
+        if morph_in:
+            self.select_morph_in_started = self.scene_started
+            self.select_morph_in_offset = 130.0
+            self.canvas.move("select_dynamic", 0, self.select_morph_in_offset * self.scale)
+            self._create_selection_sweep()
         if fade_in:
             self._create_fade_overlay(1.0)
             self.select_fade_in_started = self.scene_started
-        self.root.after(80, lambda: self._play_scene_audio("select", "music_select.mp3", loop=True, fade_ms=300))
+        self.root.after(80, lambda: self._play_scene_audio("select", self.select_bgm, loop=True, fade_ms=300))
         self._print(f"music select visible, songs: {len(self.song_groups)}, track: {self._track_key()}")
 
     def start_title_select_morph(self):
@@ -559,10 +655,16 @@ class MinigameUI(CanvasUIFramework):
         duration = self.settings["result_seconds"] if is_clear(self.health) else 3.0
         self.result_deadline = self.scene_started + duration
         self._print(f"result loaded, score: {self.score}, health: {self.health:.1f}")
-        self.root.after(180, lambda: self._play_scene_audio("result", "result.mp3", fade_ms=350))
+        result_bgm = "result_clear.mp3" if is_clear(self.health) else "result_fail.mp3"
+        self.root.after(180, lambda: self._play_scene_audio("result", result_bgm, fade_ms=350))
 
     def start_result_transition(self):
-        if self.scene != "result" or self.result_fade_started is not None or time.monotonic() < self.result_unlock_at:
+        if (
+            self.scene != "result"
+            or self.result_fade_started is not None
+            or self.result_select_morph_started is not None
+            or time.monotonic() < self.result_unlock_at
+        ):
             return
         self.result_transition_target, next_track = event_result_destination(self.track_index, is_clear(self.health))
         if next_track != self.track_index:
@@ -572,6 +674,12 @@ class MinigameUI(CanvasUIFramework):
             except OSError as error:
                 self._print(f"progress save failed: {error}")
         self.audio.stop(650)
+        if self.result_transition_target == "select":
+            self.result_select_morph_started = time.monotonic()
+            self.result_select_card_offset = 0.0
+            self._create_result_select_morph()
+            self._print("result to music select morph started")
+            return
         self.result_fade_started = time.monotonic()
         self._create_fade_overlay(0.0)
         self._print(f"result to {self.result_transition_target} fade started")
@@ -579,7 +687,7 @@ class MinigameUI(CanvasUIFramework):
     def _finish_result_transition(self):
         if self.result_transition_target == "select":
             self._reset_selection()
-            self.show_select(fade_in=True)
+            self.show_select(morph_in=True)
             return
         self._reset_selection()
         self.show_ending(fade_in=True)
@@ -626,8 +734,10 @@ class MinigameUI(CanvasUIFramework):
         self.particle_item = None
         self.fade_item = None
         self.select_time_item = None
+        self.entry_time_item = None
         self.result_time_item = None
         self.select_time_shown = None
+        self.entry_time_shown = None
         self.result_time_shown = None
         self.next_morph_items = []
         self.title_morph_logo_item = None
@@ -640,8 +750,20 @@ class MinigameUI(CanvasUIFramework):
         self.selection_scroll_started = None
         self.selection_old_offset = 0.0
         self.selection_new_offset = 0.0
+        self.selection_old_x = 0.0
+        self.selection_new_x = 0.0
         self.selection_scroll_swapped = False
         self.selection_heading_item = None
+        self.selection_sweep_item = None
+        self.select_morph_in_started = None
+        self.select_morph_in_offset = 0.0
+        self.down_button_item = None
+        self.entry_card_item = None
+        self.entry_card_frames = ()
+        self.entry_card_frame_shown = -1
+        self.warning_item = None
+        self.warning_frames = ()
+        self.warning_frame_shown = -1
         self.next_arrow_items = []
         self.result_value_items = {}
         self.result_values_shown = {}
@@ -652,6 +774,9 @@ class MinigameUI(CanvasUIFramework):
         self.health_visible_state = None
         self.result_banner_frames = ()
         self.result_banner_frame_shown = -1
+        self.result_morph_item = None
+        self.result_morph_frames = ()
+        self.result_morph_frame_shown = -1
         self.canvas.create_rectangle(
             self._x(0), self._y(0), self._x(DESIGN_WIDTH), self._y(DESIGN_HEIGHT),
             fill="#bd98e8", outline="",
@@ -663,6 +788,10 @@ class MinigameUI(CanvasUIFramework):
         self._build_common_background()
         if self.scene == "title":
             self._build_title()
+        elif self.scene == "entry":
+            self._build_entry()
+        elif self.scene == "warning":
+            self._build_warning()
         elif self.scene == "title_select":
             self._build_title_select_morph()
         elif self.scene == "select":
@@ -671,6 +800,9 @@ class MinigameUI(CanvasUIFramework):
             self._build_next()
         elif self.scene == "result":
             self._build_result()
+            if self.result_select_morph_started is not None:
+                self.result_select_card_offset = 0.0
+                self._create_result_select_morph()
         elif self.scene == "ending":
             self._build_ending()
 
@@ -726,6 +858,8 @@ class MinigameUI(CanvasUIFramework):
             track_label = f"TRACK {track_label}"
         labels = {
             "title": ("TWO", "BTN"),
+            "entry": ("ENTRY", ""),
+            "warning": ("", ""),
             "title_select": (track_label, "SELECT"),
             "select": (track_label, "SELECT"),
             "next": (track_label, "NEXT"),
@@ -749,6 +883,69 @@ class MinigameUI(CanvasUIFramework):
         self._image("title_logo", 540, 1000, tags=("title",))
         self._text_image("PRESS EITHER BUTTON", 36, 540, 1300, tags=("title",))
         self._text_image("© sujeb2 2022-2026", 14, 540, 1880, tags=("title",))
+
+    def _entry_card_sources(self):
+        if self.entry_card_source_frames:
+            return self.entry_card_source_frames
+        source = self.sources["entry"]
+        frames = []
+        for index in range(16):
+            progress = index / 15
+            eased = 1 - pow(1 - progress, 3)
+            if progress < 0.78:
+                width_scale = 0.06 + 1.02 * (1 - pow(1 - progress / 0.78, 3))
+            else:
+                width_scale = 1.08 + (1.0 - 1.08) * ((progress - 0.78) / 0.22)
+            height_scale = 0.84 + 0.16 * eased
+            width = max(1, round(source.width * width_scale))
+            height = max(1, round(source.height * height_scale))
+            frame = source.resize((width, height), Image.Resampling.LANCZOS)
+            opacity = min(1.0, progress / 0.16)
+            alpha = frame.getchannel("A").point(lambda value, factor=opacity: round(value * factor))
+            frame.putalpha(alpha)
+            frames.append(frame)
+        self.entry_card_source_frames = tuple(frames)
+        return self.entry_card_source_frames
+
+    def _warning_sources(self):
+        if self.warning_source_frames:
+            return self.warning_source_frames
+        source = self.sources["warning"]
+        frames = []
+        for index in range(13):
+            progress = index / 12
+            if progress < 0.72:
+                scale = 0.68 + 0.38 * (1 - pow(1 - progress / 0.72, 3))
+            else:
+                scale = 1.06 + (1.0 - 1.06) * ((progress - 0.72) / 0.28)
+            width = max(1, round(source.width * scale))
+            height = max(1, round(source.height * scale))
+            frame = source.resize((width, height), Image.Resampling.LANCZOS)
+            opacity = min(1.0, progress / 0.18)
+            alpha = frame.getchannel("A").point(lambda value, factor=opacity: round(value * factor))
+            frame.putalpha(alpha)
+            frames.append(frame)
+        self.warning_source_frames = tuple(frames)
+        return self.warning_source_frames
+
+    def _build_entry(self):
+        self._image("logo", 540, 270, tags=("entry",))
+        self._text_image("ENTRY", 54, 70, 755, anchor="w", tags=("entry",))
+        self._text_image("TIME LEFT", 18, 970, 725, tags=("entry",))
+        remaining = max(0, int(self.entry_deadline - time.monotonic() + 0.999))
+        self.entry_time_item = self._text_image(str(remaining), 52, 970, 780, tags=("entry_time",))
+        self.entry_time_shown = remaining
+        self.entry_card_frames = tuple(self._photo(frame) for frame in self._entry_card_sources())
+        self.entry_card_item = self.canvas.create_image(
+            self._x(540), self._y(1180), image=self.entry_card_frames[0], anchor="center", tags=("entry_card",),
+        )
+
+    def _build_warning(self):
+        self._image("logo", 540, 270, tags=("warning",))
+        self.warning_frames = tuple(self._photo(frame) for frame in self._warning_sources())
+        self.warning_item = self.canvas.create_image(
+            self._x(540), self._y(1120), image=self.warning_frames[0], anchor="center", tags=("warning_card",),
+        )
 
     def _build_title_select_morph(self):
         logo_frames = []
@@ -796,7 +993,12 @@ class MinigameUI(CanvasUIFramework):
         remaining = max(0, int(self.select_deadline - time.monotonic() + 0.999))
         self.select_time_item = self._text_image(str(remaining), 52, 970, 780, tags=("select_time",))
         self.select_time_shown = remaining
-        self._build_selection_list(("select", "select_list"))
+        self._build_selection_shell(("select", "select_shell"))
+        self._build_selection_list(("select", "select_list", "select_dynamic"))
+
+    def _build_selection_shell(self, tags):
+        self._image("select_bg", 18, 1125, anchor="nw", tags=tags)
+        self.down_button_item = self._image("down_button", 540, self.down_button_base_y, tags=tags)
 
     def _build_selection_list(self, tags):
         if self.selection_phase == "song":
@@ -821,17 +1023,20 @@ class MinigameUI(CanvasUIFramework):
             label = choices[choice_index]
             self._image("previous", x, y, tags=tags)
             self._text_image(label.upper(), 27, x, y, color="#ead7fb", tags=tags)
-        self._image("select_bg", 18, 1125, anchor="nw", tags=tags)
         self._text_image(self.track.title.upper(), 40, 100, 1228, anchor="w", tags=tags)
         detail = self.track.artist if self.selection_phase == "song" else self.track.difficulty
         self._text_image(detail.upper(), 26, 100, 1295, anchor="w", tags=tags)
         self._text_image(str(self.track.level), 92, 930, 1230, tags=tags)
         self._text_image("LEVEL", 21, 930, 1305, tags=tags)
-        self._image("select_icon", 82, 1445, tags=tags)
-        self._text_image("B1  NEXT", 24, 126, 1445, anchor="w", tags=tags)
-        self._image("select_icon", 82, 1510, tags=tags)
-        action = "DIFFICULTY" if self.selection_phase == "song" else "PLAY"
-        self._text_image(f"B2  {action}", 24, 126, 1510, anchor="w", tags=tags)
+
+    def _create_selection_sweep(self):
+        if self.selection_sweep_item is not None:
+            self.canvas.delete(self.selection_sweep_item)
+        self.selection_sweep_item = self.canvas.create_image(
+            self._x(-150), self._y(1125), image=self._asset_photo("select_sweep"),
+            anchor="nw", tags=("select_sweep",),
+        )
+        self.canvas.tag_raise(self.selection_sweep_item)
 
     def _build_next(self):
         next_item = self._text_image("NEXT", 54, 540, 900, tags=("next",))
@@ -921,6 +1126,33 @@ class MinigameUI(CanvasUIFramework):
             frames.append(frame)
         self.result_wave_source_frames[name] = tuple(frames)
         return self.result_wave_source_frames[name]
+
+    def _result_morph_sources(self):
+        if self.result_morph_source_frames:
+            return self.result_morph_source_frames
+        source = self.sources["select_bg"]
+        frames = []
+        for index in range(16):
+            progress = index / 15
+            eased = progress * progress * (3 - 2 * progress)
+            width = round(954 + (1044 - 954) * eased)
+            height = round(629 + (276 - 629) * eased)
+            frame = source.resize((width, height), Image.Resampling.LANCZOS)
+            opacity = min(1.0, 0.18 + progress * 1.35)
+            alpha = frame.getchannel("A").point(lambda value, factor=opacity: round(value * factor))
+            frame.putalpha(alpha)
+            frames.append(frame)
+        self.result_morph_source_frames = tuple(frames)
+        return self.result_morph_source_frames
+
+    def _create_result_select_morph(self):
+        self.result_morph_frames = tuple(self._photo(frame) for frame in self._result_morph_sources())
+        self.result_morph_frame_shown = 0
+        self.result_morph_item = self.canvas.create_image(
+            self._x(540), self._y(1344), image=self.result_morph_frames[0],
+            anchor="center", tags=("result_morph",),
+        )
+        self.canvas.tag_raise(self.result_morph_item)
 
     def _judgement_animation_sources(self, name):
         if name in self.judgement_source_frames:
@@ -1307,6 +1539,46 @@ class MinigameUI(CanvasUIFramework):
         if progress >= 1.0:
             self.show_select()
 
+    def _animate_entry(self, now):
+        if self.entry_title_fade_started is not None:
+            progress = min(1.0, (now - self.entry_title_fade_started) / 0.65)
+            eased = progress * progress * (3 - 2 * progress)
+            self._set_fade_opacity(eased)
+            if progress >= 1.0:
+                self.show_title(fade_in=True)
+            return
+        elapsed = now - self.scene_started
+        progress = min(1.0, elapsed / 0.72)
+        frame = min(len(self.entry_card_frames) - 1, round(progress * (len(self.entry_card_frames) - 1)))
+        if frame != self.entry_card_frame_shown:
+            self.canvas.itemconfigure(self.entry_card_item, image=self.entry_card_frames[frame])
+            self.entry_card_frame_shown = frame
+        remaining = max(0, int(self.entry_deadline - now + 0.999))
+        if self.entry_time_item is not None and remaining != self.entry_time_shown:
+            self.canvas.itemconfigure(self.entry_time_item, image=self._text(str(remaining), 52))
+            self.entry_time_shown = remaining
+        if now >= self.entry_deadline:
+            self._start_entry_title_transition()
+
+    def _animate_warning(self, now):
+        elapsed = now - self.scene_started
+        progress = min(1.0, elapsed / 0.48)
+        frame = min(len(self.warning_frames) - 1, round(progress * (len(self.warning_frames) - 1)))
+        if frame != self.warning_frame_shown:
+            self.canvas.itemconfigure(self.warning_item, image=self.warning_frames[frame])
+            self.warning_frame_shown = frame
+        if now >= self.warning_deadline:
+            self._reset_selection()
+            self.show_select(morph_in=True)
+
+    def _animate_down_button(self, now):
+        if self.down_button_item is None:
+            return
+        phase = ((now - self.scene_started) * 2.0) % 2.0
+        offset = -8.0 + 16.0 * phase if phase < 1.0 else 8.0 - 16.0 * (phase - 1.0)
+        self.canvas.coords(self.down_button_item, self._x(540), self._y(self.down_button_base_y + offset))
+        self.canvas.tag_raise(self.down_button_item)
+
     def _animate_next(self, now):
         elapsed = now - self.scene_started
         progress = min(1.0, elapsed / 0.72)
@@ -1372,6 +1644,28 @@ class MinigameUI(CanvasUIFramework):
                 size = 63 if name == "score" else 29
                 self.canvas.itemconfigure(self.result_value_items[name], image=self._text(str(value), size))
                 self.result_values_shown[name] = value
+        if self.result_select_morph_started is not None:
+            morph_progress = min(1.0, (now - self.result_select_morph_started) / 0.72)
+            morph_eased = morph_progress * morph_progress * (3 - 2 * morph_progress)
+            card_offset = 720 * morph_eased
+            card_delta = card_offset - self.result_select_card_offset
+            if abs(card_delta) > 0.001:
+                self.canvas.move("result_card", 0, card_delta * self.scale)
+                self.result_select_card_offset = card_offset
+            if self.result_banner_item is not None:
+                self.canvas.coords(
+                    self.result_banner_item,
+                    self._x(540), self._y(925 - 235 * morph_eased + 3 * math.sin(elapsed * 2.4)),
+                )
+            frame = min(len(self.result_morph_frames) - 1, round(morph_progress * (len(self.result_morph_frames) - 1)))
+            if frame != self.result_morph_frame_shown:
+                self.canvas.itemconfigure(self.result_morph_item, image=self.result_morph_frames[frame])
+                self.result_morph_frame_shown = frame
+            self.canvas.coords(self.result_morph_item, self._x(540), self._y(1344 - 81 * morph_eased))
+            self.canvas.tag_raise(self.result_morph_item)
+            if morph_progress >= 1.0:
+                self._finish_result_transition()
+            return
         if self.result_fade_started is not None:
             fade_progress = min(1.0, (now - self.result_fade_started) / 0.78)
             fade_eased = fade_progress * fade_progress * (3 - 2 * fade_progress)
@@ -1393,28 +1687,63 @@ class MinigameUI(CanvasUIFramework):
     def _animate_selection_scroll(self, now):
         if self.selection_scroll_started is None:
             return
-        progress = min(1.0, (now - self.selection_scroll_started) / 0.42)
-        if progress < 0.46:
-            part = progress / 0.46
+        progress = min(1.0, (now - self.selection_scroll_started) / 0.52)
+        sweep_eased = progress * progress * (3 - 2 * progress)
+        if self.selection_sweep_item is not None:
+            self.canvas.coords(self.selection_sweep_item, self._x(-150 + 1380 * sweep_eased), self._y(1125))
+            self.canvas.tag_raise(self.selection_sweep_item)
+        if progress < 0.48:
+            part = progress / 0.48
             eased = 1 - pow(1 - part, 3)
-            old_offset = -180.0 * eased
+            angle = eased * math.pi / 2
+            old_x = 250.0 * math.sin(angle)
+            old_offset = -180.0 * (1 - math.cos(angle))
+            old_x_delta = old_x - self.selection_old_x
             old_delta = old_offset - self.selection_old_offset
-            self.canvas.move("select_old", 0, old_delta * self.scale)
+            self.canvas.move("select_old", old_x_delta * self.scale, old_delta * self.scale)
+            self.selection_old_x = old_x
             self.selection_old_offset = old_offset
             return
         if not self.selection_scroll_swapped:
             self.canvas.delete("select_old")
             self.canvas.itemconfigure("select_new", state="normal")
             self.selection_scroll_swapped = True
-        part = (progress - 0.46) / 0.54
+        part = (progress - 0.48) / 0.52
         eased = 1 - pow(1 - part, 3)
-        new_offset = 180.0 * (1 - eased)
+        angle = (1 - eased) * math.pi / 2
+        new_x = 250.0 * math.sin(angle)
+        new_offset = 180.0 * (1 - math.cos(angle))
+        new_x_delta = new_x - self.selection_new_x
         new_delta = new_offset - self.selection_new_offset
-        self.canvas.move("select_new", 0, new_delta * self.scale)
+        self.canvas.move("select_new", new_x_delta * self.scale, new_delta * self.scale)
+        self.selection_new_x = new_x
         self.selection_new_offset = new_offset
         if progress >= 1.0:
             self.canvas.dtag("select_new", "select_new")
             self.selection_scroll_started = None
+            if self.selection_sweep_item is not None:
+                self.canvas.delete(self.selection_sweep_item)
+                self.selection_sweep_item = None
+
+    def _animate_select_morph_in(self, now):
+        if self.select_morph_in_started is None:
+            return
+        progress = min(1.0, (now - self.select_morph_in_started) / 0.58)
+        eased = 1 - pow(1 - progress, 3)
+        offset = 130.0 * (1 - eased)
+        delta = offset - self.select_morph_in_offset
+        if abs(delta) > 0.001:
+            self.canvas.move("select_dynamic", 0, delta * self.scale)
+            self.select_morph_in_offset = offset
+        if self.selection_sweep_item is not None:
+            sweep = progress * progress * (3 - 2 * progress)
+            self.canvas.coords(self.selection_sweep_item, self._x(-150 + 1380 * sweep), self._y(1125))
+            self.canvas.tag_raise(self.selection_sweep_item)
+        if progress >= 1.0:
+            self.select_morph_in_started = None
+            if self.selection_sweep_item is not None:
+                self.canvas.delete(self.selection_sweep_item)
+                self.selection_sweep_item = None
 
     def _animate_ending(self, now):
         if self.ending_fade_in_started is not None:
@@ -1462,11 +1791,17 @@ class MinigameUI(CanvasUIFramework):
             self._animate_transition(now)
         elif self.scene == "title":
             self._animate_title_fade(now)
+        elif self.scene == "entry":
+            self._animate_entry(now)
+        elif self.scene == "warning":
+            self._animate_warning(now)
         elif self.scene == "title_select":
             self._animate_title_select_morph(now)
         elif self.scene == "select":
             self._animate_select_fade(now)
+            self._animate_select_morph_in(now)
             self._animate_selection_scroll(now)
+            self._animate_down_button(now)
             remaining = max(0, int(self.select_deadline - now + 0.999))
             if self.select_time_item is not None and remaining != self.select_time_shown:
                 self.canvas.itemconfigure(self.select_time_item, image=self._text(str(remaining), 52))
@@ -1483,7 +1818,11 @@ class MinigameUI(CanvasUIFramework):
             if self.result_time_item is not None and remaining != self.result_time_shown:
                 self.canvas.itemconfigure(self.result_time_item, image=self._text(str(remaining), 52))
                 self.result_time_shown = remaining
-            if now >= self.result_deadline and self.result_fade_started is None:
+            if (
+                now >= self.result_deadline
+                and self.result_fade_started is None
+                and self.result_select_morph_started is None
+            ):
                 self.start_result_transition()
         elif self.scene == "ending":
             self._animate_ending(now)
