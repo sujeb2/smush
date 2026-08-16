@@ -6,7 +6,7 @@ import queue
 import time
 from datetime import datetime
 
-from PIL import Image, ImageFilter, ImageTk
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageTk
 
 from game.osu_chart import discover_osu_mania_2k
 from ui_framework import CanvasUIFramework, DESIGN_HEIGHT, DESIGN_WIDTH, find_compiled_dir
@@ -19,6 +19,7 @@ PERFECT_WINDOW = 0.09
 GOOD_WINDOW = 0.18
 BAD_WINDOW = 0.30
 HIT_WINDOW = 0.34
+HOLD_TICK_INTERVAL = 0.25
 JUDGEMENT_WEIGHT = {
     "perfect": 1.0,
     "good": 0.65,
@@ -42,6 +43,21 @@ def calculate_score(judgements, note_count):
 
 def is_clear(health):
     return health > 0 and health >= 5.0
+
+
+def combo_after_judgement(combo, judgement):
+    return 0 if judgement == "miss" else combo + 1
+
+
+def hold_tick_times(note_time, end_time, interval=HOLD_TICK_INTERVAL):
+    if end_time is None or end_time <= note_time or interval <= 0:
+        return ()
+    ticks = []
+    tick = note_time + interval
+    while tick <= end_time + 0.000001:
+        ticks.append(round(tick, 6))
+        tick += interval
+    return tuple(ticks)
 
 
 def group_charts_by_song(charts):
@@ -210,7 +226,23 @@ class MinigameUI(CanvasUIFramework):
         self.judgements = []
         self.counts = {key: 0 for key in JUDGEMENT_WEIGHT}
         self.health = 100.0
+        self.display_health = 100.0
         self.score = 0
+        self.combo = 0
+        self.max_combo = 0
+        self.active_holds = {}
+        self.combo_label_item = None
+        self.combo_item = None
+        self.combo_frame_shown = -1
+        self.combo_photo_cache = {}
+        self.combo_animation_started = None
+        self.combo_frame_shown = -1
+        self.health_animation_started = None
+        self.health_animation_from = 100.0
+        self.health_pulse_started = None
+        self.health_change_direction = 0
+        self.health_dynamic_photo = None
+        self.health_visible_state = None
         self.feedback_until = 0.0
         self.feedback_started = 0.0
         self.feedback_frame_shown = -1
@@ -238,6 +270,9 @@ class MinigameUI(CanvasUIFramework):
         self.next_arrow_frames = ()
         self.result_card_offset = 0.0
         self.result_banner_item = None
+        self.result_banner_frames = ()
+        self.result_banner_frame_shown = -1
+        self.result_wave_source_frames = {}
         self.result_value_items = {}
         self.result_values_shown = {}
         self.judgement_frames = {}
@@ -469,7 +504,19 @@ class MinigameUI(CanvasUIFramework):
         self.judgements = []
         self.counts = {key: 0 for key in JUDGEMENT_WEIGHT}
         self.health = 100.0
+        self.display_health = 100.0
         self.score = 0
+        self.combo = 0
+        self.max_combo = 0
+        self.active_holds = {}
+        self.combo_animation_started = None
+        self.combo_frame_shown = -1
+        self.health_animation_started = None
+        self.health_animation_from = 100.0
+        self.health_pulse_started = None
+        self.health_change_direction = 0
+        self.health_dynamic_photo = None
+        self.health_visible_state = None
         self.feedback_until = 0.0
         self.last_feedback = ""
         self.feedback_visible = False
@@ -598,6 +645,13 @@ class MinigameUI(CanvasUIFramework):
         self.next_arrow_items = []
         self.result_value_items = {}
         self.result_values_shown = {}
+        self.combo_label_item = None
+        self.combo_item = None
+        self.health_fill_item = None
+        self.health_dynamic_photo = None
+        self.health_visible_state = None
+        self.result_banner_frames = ()
+        self.result_banner_frame_shown = -1
         self.canvas.create_rectangle(
             self._x(0), self._y(0), self._x(DESIGN_WIDTH), self._y(DESIGN_HEIGHT),
             fill="#bd98e8", outline="",
@@ -816,20 +870,57 @@ class MinigameUI(CanvasUIFramework):
         self._image("top_gradient", 0, 0, anchor="nw", tags=("game",))
         self._build_header()
         self._text_image("DIFFICULTY", 26, 95, 300, anchor="w", tags=("game",))
-        self._text_image(self.track.difficulty, 47, 95, 360, anchor="w", tags=("game",))
+        title_size = 47 if len(self.track.title) <= 20 else max(30, round(47 * 20 / len(self.track.title)))
+        self._text_image(self.track.title.upper(), title_size, 95, 360, anchor="w", tags=("game",))
         self._text_image("SCORE", 26, 1008, 300, anchor="e", tags=("game",))
-        self.score_item = self._text_image("0", 58, 1008, 362, anchor="e", tags=("game_score",))
+        self.score_item = self._text_image(str(self.score), 58, 1008, 362, anchor="e", tags=("game_score",))
         self._image("main_layer", 290, 470, anchor="nw", tags=("game",))
         self.note_photos = (self._asset_photo("note_0"), self._asset_photo("note_1"))
+        self.combo_item = self.canvas.create_image(self._x(540), self._y(790), anchor="center", tags=("game_combo",))
+        if self.combo > 0:
+            self.canvas.itemconfigure(self.combo_item, image=self._combo_photo(self.combo, 78))
         self.judgement_line_item = self._image("line", 290, 1560, anchor="nw", tags=("game_line",))
         self._image("health_bg", 835, 655, anchor="nw", tags=("game",))
-        self.health_fill_item = self.canvas.create_image(self._x(835), self._y(1554), anchor="sw", tags=("game_health",))
+        self.health_fill_item = self.canvas.create_image(self._x(853), self._y(1554), anchor="s", tags=("game_health",))
         self.judgement_item = self.canvas.create_image(self._x(540), self._y(1715), anchor="center", tags=("game_feedback",))
         self.judgement_frames = {
             name: tuple(self._photo(frame) for frame in self._judgement_animation_sources(name))
             for name in JUDGEMENT_WEIGHT
         }
         self._update_health_image()
+
+    def _combo_photo(self, combo, number_size):
+        key = combo, number_size, round(self.scale, 5)
+        if key in self.combo_photo_cache:
+            return self.combo_photo_cache[key]
+        image = Image.new("RGBA", (340, 190), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        label_font = ImageFont.truetype(self.novecento_demibold_font_path, round(29 * TEXT_SCALE))
+        number_font = ImageFont.truetype(self.novecento_demibold_font_path, round(number_size * TEXT_SCALE))
+        label_box = draw.textbbox((0, 0), "COMBO", font=label_font)
+        number = str(combo)
+        number_box = draw.textbbox((0, 0), number, font=number_font)
+        draw.text(((340 - label_box[2] + label_box[0]) / 2, 8 - label_box[1]), "COMBO", font=label_font, fill="white")
+        draw.text(((340 - number_box[2] + number_box[0]) / 2, 68 - number_box[1]), number, font=number_font, fill="white")
+        self.combo_photo_cache[key] = self._scaled_photo(image)
+        return self.combo_photo_cache[key]
+
+    def _result_wave_sources(self, name):
+        if name in self.result_wave_source_frames:
+            return self.result_wave_source_frames[name]
+        source = self.sources[name]
+        padding = 10
+        frames = []
+        for frame_index in range(18):
+            frame = Image.new("RGBA", (source.width, source.height + padding * 2), (0, 0, 0, 0))
+            phase = frame_index / 18 * math.tau
+            for x in range(0, source.width, 4):
+                right = min(source.width, x + 4)
+                offset = round(4 * math.sin(x / source.width * math.tau * 1.35 + phase))
+                frame.alpha_composite(source.crop((x, 0, right, source.height)), (x, padding + offset))
+            frames.append(frame)
+        self.result_wave_source_frames[name] = tuple(frames)
+        return self.result_wave_source_frames[name]
 
     def _judgement_animation_sources(self, name):
         if name in self.judgement_source_frames:
@@ -893,8 +984,11 @@ class MinigameUI(CanvasUIFramework):
         remaining = max(0, int(self.result_deadline - time.monotonic() + 0.999))
         self.result_time_item = self._text_image(str(remaining), 52, 970, 780, tags=("result_time",))
         self.result_time_shown = remaining
-        self.result_banner_item = self._image(
-            "clear" if is_clear(self.health) else "failed", 540, 840, tags=("result_banner",),
+        banner_name = "clear" if is_clear(self.health) else "failed"
+        self.result_banner_frames = tuple(self._photo(frame) for frame in self._result_wave_sources(banner_name))
+        self.result_banner_frame_shown = 0
+        self.result_banner_item = self.canvas.create_image(
+            self._x(540), self._y(840), image=self.result_banner_frames[0], anchor="center", tags=("result_banner",),
         )
         self.result_card_offset = 560.0
         offset = self.result_card_offset
@@ -986,29 +1080,120 @@ class MinigameUI(CanvasUIFramework):
         self.resolved_notes.add(index)
         self.judgements.append(judgement)
         self.counts[judgement] += 1
+        previous_health = self.health
         self.health = min(100.0, max(0.0, self.health + HEALTH_CHANGE[judgement]))
         self.score = calculate_score(self.judgements, len(self.track.notes))
+        if judgement == "miss":
+            self._break_combo()
+        else:
+            self._advance_combo()
+            note = self.track.notes[index]
+            ticks = tuple(tick for tick in hold_tick_times(note.time, note.end_time) if tick > time.monotonic() - self.game_started)
+            if ticks:
+                self.active_holds[index] = {"ticks": ticks, "next": 0, "end_time": note.end_time}
         self.last_feedback = judgement
         self.feedback_started = time.monotonic()
         self.feedback_until = self.feedback_started + 0.58
         self.feedback_frame_shown = 0
         if self.score_item is not None:
             self.canvas.itemconfigure(self.score_item, image=self._text(str(self.score), 58))
-        self._update_health_image()
+        self._start_health_animation(previous_health, self.health)
         if self.judgement_item is not None:
             self.canvas.itemconfigure(self.judgement_item, image=self.judgement_frames[self.last_feedback][0])
             self.feedback_visible = True
 
-    def _update_health_image(self):
+    def _advance_combo(self):
+        self.combo = combo_after_judgement(self.combo, "perfect")
+        self.max_combo = max(self.max_combo, self.combo)
+        self.combo_animation_started = time.monotonic()
+        self.combo_frame_shown = -1
+        if self.combo_item is not None:
+            self.canvas.itemconfigure(self.combo_item, image=self._combo_photo(self.combo, 70))
+
+    def _break_combo(self):
+        self.combo = 0
+        self.combo_animation_started = None
+        self.combo_frame_shown = -1
+        if self.combo_item is not None:
+            self.canvas.itemconfigure(self.combo_item, image="")
+
+    def _animate_combo(self, now):
+        if self.combo_item is None or self.combo <= 0:
+            return
+        if self.combo_animation_started is None:
+            frame = 4
+        else:
+            progress = min(1.0, (now - self.combo_animation_started) / 0.24)
+            frame = min(4, int(progress * 5))
+            if progress >= 1.0:
+                self.combo_animation_started = None
+        if frame == self.combo_frame_shown:
+            return
+        sizes = (70, 84, 80, 79, 78)
+        y_positions = (798, 784, 789, 790, 790)
+        self.canvas.itemconfigure(self.combo_item, image=self._combo_photo(self.combo, sizes[frame]))
+        self.canvas.coords(self.combo_item, self._x(540), self._y(y_positions[frame]))
+        self.combo_frame_shown = frame
+
+    def _start_health_animation(self, previous, current):
+        self.health_animation_from = self.display_health
+        self.health_animation_started = time.monotonic()
+        self.health_pulse_started = self.health_animation_started
+        self.health_change_direction = 1 if current > previous else -1 if current < previous else 0
+
+    def _animate_health(self, now):
         if self.health_fill_item is None:
             return
+        if self.health_animation_started is not None:
+            progress = min(1.0, (now - self.health_animation_started) / 0.28)
+            eased = progress * progress * (3 - 2 * progress)
+            self.display_health = self.health_animation_from + (self.health - self.health_animation_from) * eased
+            if progress >= 1.0:
+                self.display_health = self.health
+                self.health_animation_started = None
+        pulse_progress = 1.0
+        if self.health_pulse_started is not None:
+            pulse_progress = min(1.0, (now - self.health_pulse_started) / 0.34)
+            if pulse_progress >= 1.0:
+                self.health_pulse_started = None
+        pulse = math.sin(pulse_progress * math.pi) * (0.08 if self.health_change_direction >= 0 else 0.13)
+        shake = 0.0
+        if self.health_change_direction < 0 and pulse_progress < 1.0:
+            shake = math.sin(pulse_progress * math.pi * 6) * 4 * (1 - pulse_progress)
+        self._update_health_image(self.display_health, 1.0 + pulse, shake)
+
+    def _update_health_image(self, value=None, width_scale=1.0, shake=0.0):
+        if self.health_fill_item is None:
+            return
+        value = self.health if value is None else value
+        state = round(value, 1), round(width_scale, 2)
+        self.canvas.coords(self.health_fill_item, self._x(853 + shake), self._y(1554))
+        if state == self.health_visible_state:
+            return
+        self.health_visible_state = state
         source = self.sources["health"]
-        if self.health <= 0:
+        if value <= 0:
             self.canvas.itemconfigure(self.health_fill_item, image="")
             return
-        visible_height = max(1, round(source.height * self.health / 100.0))
+        visible_height = max(1, round(source.height * value / 100.0))
         crop = source.crop((0, source.height - visible_height, source.width, source.height))
-        self.canvas.itemconfigure(self.health_fill_item, image=self._photo(crop))
+        width = max(1, round(crop.width * width_scale))
+        if width != crop.width:
+            crop = crop.resize((width, crop.height), Image.Resampling.LANCZOS)
+        self.health_dynamic_photo = self._scaled_photo(crop)
+        self.canvas.itemconfigure(self.health_fill_item, image=self.health_dynamic_photo)
+
+    def _update_hold_ticks(self, elapsed):
+        for index, state in tuple(self.active_holds.items()):
+            ticks = state["ticks"]
+            while state["next"] < len(ticks) and elapsed >= ticks[state["next"]]:
+                state["next"] += 1
+                previous_health = self.health
+                self.health = min(100.0, self.health + 0.08)
+                self._advance_combo()
+                self._start_health_animation(previous_health, self.health)
+            if elapsed > state["end_time"] + BAD_WINDOW:
+                self.active_holds.pop(index, None)
 
     def _update_feedback_image(self):
         if self.judgement_item is None or not self.feedback_visible:
@@ -1029,6 +1214,7 @@ class MinigameUI(CanvasUIFramework):
         if self.scene != "game" or self.game_started is None:
             return
         elapsed = now - self.game_started
+        self._update_hold_ticks(elapsed)
         for index, note in enumerate(self.track.notes):
             if index not in self.resolved_notes and elapsed > note.time + BAD_WINDOW:
                 self._resolve_note(index, "miss")
@@ -1037,25 +1223,50 @@ class MinigameUI(CanvasUIFramework):
         hit_y = 1560
         visible_notes = set()
         for index, note in enumerate(self.track.notes):
-            if index in self.resolved_notes:
+            active_hold = index in self.active_holds
+            if index in self.resolved_notes and not active_hold:
                 continue
             time_until = note.time - elapsed
-            if 0.0 <= time_until <= lead_time:
+            tail_until = (note.end_time if note.end_time is not None else note.time) - elapsed
+            if tail_until >= -BAD_WINDOW and time_until <= lead_time:
                 visible_notes.add(index)
-                y = hit_y - time_until / lead_time * (hit_y - start_y)
+                y = hit_y if active_hold else min(hit_y, hit_y - time_until / lead_time * (hit_y - start_y))
+                tail_y = min(hit_y, hit_y - tail_until / lead_time * (hit_y - start_y))
                 x = 290 + note.lane * 250
                 if index not in self.note_items:
-                    self.note_items[index] = self.canvas.create_image(
+                    body = None
+                    tail = None
+                    if note.end_time is not None and note.end_time > note.time:
+                        body = self.canvas.create_rectangle(
+                            self._x(x + 28), self._y(tail_y + 22), self._x(x + 222), self._y(y + 22),
+                            fill="#145fda" if note.lane == 0 else "#d7d7dc", outline="", tags=("game_note",),
+                        )
+                        tail = self.canvas.create_image(
+                            self._x(x), self._y(tail_y), image=self.note_photos[note.lane], anchor="nw", tags=("game_note",),
+                        )
+                    head = self.canvas.create_image(
                         self._x(x), self._y(y), image=self.note_photos[note.lane], anchor="nw", tags=("game_note",),
                     )
+                    self.note_items[index] = {"body": body, "tail": tail, "head": head}
                 else:
-                    self.canvas.coords(self.note_items[index], self._x(x), self._y(y))
+                    items = self.note_items[index]
+                    self.canvas.coords(items["head"], self._x(x), self._y(y))
+                    if items["body"] is not None:
+                        self.canvas.coords(
+                            items["body"], self._x(x + 28), self._y(tail_y + 22), self._x(x + 222), self._y(y + 22),
+                        )
+                        self.canvas.coords(items["tail"], self._x(x), self._y(tail_y))
         for index in tuple(self.note_items):
             if index not in visible_notes:
-                self.canvas.delete(self.note_items.pop(index))
+                for item in self.note_items.pop(index).values():
+                    if item is not None:
+                        self.canvas.delete(item)
         self.canvas.tag_raise("game_line")
+        self.canvas.tag_raise("game_combo")
         self.canvas.tag_raise("game_feedback")
         self.canvas.tag_raise("game_health")
+        self._animate_combo(now)
+        self._animate_health(now)
         self._update_feedback_image()
         if not self.game_finishing and (self.health <= 0 or elapsed >= self.track.duration + 1.6):
             self.game_finishing = True
@@ -1146,7 +1357,11 @@ class MinigameUI(CanvasUIFramework):
             self.canvas.move("result_card", 0, delta * self.scale)
             self.result_card_offset = new_offset
         if self.result_banner_item is not None:
-            banner_y = 840 + 85 * eased
+            banner_frame = int(elapsed * 15) % len(self.result_banner_frames)
+            if banner_frame != self.result_banner_frame_shown:
+                self.canvas.itemconfigure(self.result_banner_item, image=self.result_banner_frames[banner_frame])
+                self.result_banner_frame_shown = banner_frame
+            banner_y = 840 + 85 * eased + 3 * math.sin(elapsed * 2.4)
             self.canvas.coords(self.result_banner_item, self._x(540), self._y(banner_y))
         count_progress = min(1.0, elapsed / 1.25)
         count_eased = 1 - pow(1 - count_progress, 3)

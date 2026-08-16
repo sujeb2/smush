@@ -7,9 +7,11 @@ from game.minigame import (
     EVENT_TRACK_COUNT,
     MAX_SCORE,
     calculate_score,
+    combo_after_judgement,
     event_result_destination,
     group_charts_by_song,
     is_clear,
+    hold_tick_times,
     load_progress,
     save_progress,
 )
@@ -28,6 +30,17 @@ class ScoreTests(unittest.TestCase):
         self.assertFalse(is_clear(0))
         self.assertFalse(is_clear(4.99))
         self.assertTrue(is_clear(5))
+
+    def test_combo_increments_for_hits_and_resets_for_miss(self):
+        combo = 0
+        for judgement in ("perfect", "good", "bad"):
+            combo = combo_after_judgement(combo, judgement)
+        self.assertEqual(combo, 3)
+        self.assertEqual(combo_after_judgement(combo, "miss"), 0)
+
+    def test_hold_ticks_follow_quarter_second_interval(self):
+        self.assertEqual(hold_tick_times(1.0, 2.0), (1.25, 1.5, 1.75, 2.0))
+        self.assertEqual(hold_tick_times(1.0, None), ())
 
 
 class OsuChartTests(unittest.TestCase):

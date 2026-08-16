@@ -1,0 +1,78 @@
+﻿osu file format v128
+
+[General]
+AudioFilename: audio.mp3
+AudioLeadIn: 0
+PreviewTime: -1
+Countdown: 0
+SampleSet: Normal
+StackLeniency: 0.7
+Mode: 3
+LetterboxInBreaks: 0
+SpecialStyle: 0
+UseSkinSprites: 0
+WidescreenStoryboard: 1
+
+[Editor]
+DistanceSpacing: 1
+BeatDivisor: 8
+GridSize: 0
+TimelineZoom: 1
+VelocityPresets: 0.75,1,1.5
+
+[Metadata]
+Title: Warp Drive Active
+TitleUnicode: Warp Drive Active
+Artist: Kari
+ArtistUnicode: Kari
+Creator: notsongro
+Version: NORMAL
+
+[Difficulty]
+HPDrainRate: 5
+CircleSize: 2
+OverallDifficulty: 5
+ApproachRate: 5
+SliderMultiplier: 1.3999999687075613
+SliderTickRate: 1
+
+[Events]
+// Background and Video events
+0,0,"",0,0
+// Storyboard Layer 0 (Background)
+// Storyboard Layer 1 (Fail)
+// Storyboard Layer 2 (Pass)
+// Storyboard Layer 3 (Foreground)
+// Storyboard Layer 4 (Overlay)
+// Storyboard Sound Samples
+// Break Periods
+2,2567.928155739267,4167.928155739267
+2,5942.928155739267,6605.428155739267
+2,7405.428155739267,9042.928155739268
+2,10667.928155739268,11405.428155739268
+
+[TimingPoints]
+2367.928155739267,300,4,1,0,100,1,0
+
+
+[HitObjects]
+128,192,2367.928155739267,1,0,1:0:0:100:
+384,192,4767.928155739267,1,0,1:0:0:100:
+128,192,5255.428155739267,1,0,1:0:0:100:
+384,192,5742.928155739267,1,0,1:0:0:100:
+128,192,7205.428155739267,1,0,1:0:0:100:
+384,192,7205.428155739267,1,0,1:0:0:100:
+384,192,9642.928155739268,1,0,1:0:0:100:
+128,192,10017.928155739268,1,0,1:0:0:100:
+384,192,10467.928155739268,1,0,1:0:0:100:
+128,192,12005.428155739268,128,0,14217.928155739268:1:0:0:100:
+384,192,12005.428155739268,128,0,12267.928155739268:1:0:0:100:
+384,192,12455.428155739268,128,0,12642.928155739268:1:0:0:100:
+384,192,12830.428155739268,128,0,13055.428155739268:1:0:0:100:
+384,192,13167.928155739268,128,0,13430.428155739268:1:0:0:100:
+384,192,13617.928155739268,128,0,13805.428155739268:1:0:0:100:
+384,192,13992.928155739268,128,0,14217.928155739268:1:0:0:100:
+128,192,14367.928155739268,1,0,1:0:0:100:
+384,192,14367.928155739268,1,0,1:0:0:100:
+384,192,14817.928155739268,1,0,1:0:0:100:
+128,192,15267.928155739268,1,0,1:0:0:100:
