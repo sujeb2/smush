@@ -7,5 +7,5 @@ tk
 torchvision
 ultralytics
 imageai
-nuitka
+pyinstaller
 pygame
