@@ -187,14 +187,16 @@ class AudioPlayer:
         if not self.available or not os.path.isfile(path):
             if not os.path.isfile(path):
                 self._print(f"sfx file missing: {path}")
-            return
+            return None
         try:
             if path not in self.sfx_cache:
                 self.sfx_cache[path] = self.pygame.mixer.Sound(path)
-            self.sfx_cache[path].play()
+            channel = self.sfx_cache[path].play()
             self._print(f"[AudioManager] playing sfx: {os.path.basename(path)}")
+            return channel
         except Exception as error:
             self._print(f"[AudioManager] sfx playback failed: {error}")
+            return None
 
     def is_playing(self):
         if not self.available:
@@ -252,6 +254,9 @@ class MinigameUI(CanvasUIFramework):
         self.total_result_time_shown = None
         self.total_result_value_item = None
         self.total_result_value_shown = None
+        self.total_result_count_started = False
+        self.total_result_count_finished = False
+        self.total_result_count_channel = None
         self.total_result_card_items = []
         self.total_result_cards_revealed = 0
         self.timer_sfx_value = None
@@ -449,7 +454,7 @@ class MinigameUI(CanvasUIFramework):
         self.sources["select_sweep"] = sweep
         self.bgm_root = os.path.join(self.base, "game", "bgm")
         self.sfx_root = os.path.join(self.bgm_root, "sfx")
-        self.select_bgm = "entry.mp3"
+        self.select_bgm = "music_select.mp3"
         if not os.path.isfile(os.path.join(self.bgm_root, self.select_bgm)):
             self.select_bgm = os.path.join("finale", "music_select.mp3")
 
@@ -694,9 +699,9 @@ class MinigameUI(CanvasUIFramework):
         self.scene = "warning"
         self._build_scene()
         self.scene_started = time.monotonic()
-        self.warning_deadline = self.scene_started + 3.0
+        self.warning_deadline = self.scene_started + 5.0
         self.root.after(120, lambda: self._play_sfx("card_show.wav") if self.scene == "warning" else None)
-        self._print("warning visible, duration: 3 seconds")
+        self._print("warning visible, duration: 5 seconds")
 
     def show_select(self):
         self.scene = "select"
@@ -747,7 +752,7 @@ class MinigameUI(CanvasUIFramework):
             self.audio.play(os.path.join(self.bgm_root, filename), loop=loop, fade_ms=fade_ms)
 
     def _play_sfx(self, filename):
-        self.audio.play_sfx(os.path.join(self.sfx_root, filename))
+        return self.audio.play_sfx(os.path.join(self.sfx_root, filename))
 
     def _update_timer(self, item, remaining, shown_attribute, size=52):
         shown = getattr(self, shown_attribute)
@@ -906,6 +911,9 @@ class MinigameUI(CanvasUIFramework):
 
     def show_total_result(self):
         self.scene = "total_result"
+        self.total_result_count_started = False
+        self.total_result_count_finished = False
+        self.total_result_count_channel = None
         self.total_result_deadline = time.monotonic() + 20.0
         self._build_scene()
         self.scene_started = time.monotonic()
@@ -917,6 +925,9 @@ class MinigameUI(CanvasUIFramework):
     def start_total_result_transition(self):
         if self.scene != "total_result" or self.loading_phase is not None:
             return
+        if self.total_result_count_channel is not None:
+            self.total_result_count_channel.stop()
+            self.total_result_count_channel = None
         self._play_sfx("ok.wav")
         self._start_loading("ending", self.show_ending)
 
@@ -2025,10 +2036,19 @@ class MinigameUI(CanvasUIFramework):
         elapsed = now - self.scene_started
         progress = min(1.0, elapsed / 1.35)
         eased = 1 - pow(1 - progress, 3)
+        if not self.total_result_count_started:
+            self.total_result_count_started = True
+            self.total_result_count_channel = self._play_sfx("score_count.wav")
         value = round(sum(self.track_scores) * eased)
         if value != self.total_result_value_shown:
             self.canvas.itemconfigure(self.total_result_value_item, image=self._text(f"{value:,}", 76))
             self.total_result_value_shown = value
+        if progress >= 1.0 and not self.total_result_count_finished:
+            self.total_result_count_finished = True
+            if self.total_result_count_channel is not None:
+                self.total_result_count_channel.stop()
+                self.total_result_count_channel = None
+            self._play_sfx("score_added.wav")
 
     def _animate_ending(self, now):
         audio_finished = self.ending_audio_started and self.audio.available and not self.audio.is_playing()
