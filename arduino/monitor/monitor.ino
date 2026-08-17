@@ -64,6 +64,13 @@ void loop() {
       conveyorRunning = true;
       Serial.write("Forwarded_2");
     }
+
+    switch(read) {
+      case read.contains('blink'):
+        break;
+      case read.contains('both_blink'):
+        break;
+    }
   }
 
   if(conveyorRunning) {

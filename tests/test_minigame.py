@@ -12,6 +12,7 @@ from game.minigame import (
     group_charts_by_song,
     is_clear,
     hold_tick_times,
+    load_event_results,
     load_progress,
     save_progress,
 )
@@ -103,8 +104,16 @@ class ProgressTests(unittest.TestCase):
         self.assertEqual(EVENT_TRACK_COUNT, 3)
         self.assertEqual(event_result_destination(0, True), ("select", 1))
         self.assertEqual(event_result_destination(1, True), ("select", 2))
-        self.assertEqual(event_result_destination(2, True), ("ending", 0))
+        self.assertEqual(event_result_destination(2, True), ("total_result", 0))
         self.assertEqual(event_result_destination(1, False), ("ending", 0))
+
+    def test_track_results_are_saved_for_total_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "progress.json")
+            scores = [9000, 7200, 8100]
+            names = ["First", "Second", "Final"]
+            save_progress(path, 2, 3, scores, names)
+            self.assertEqual(load_event_results(path, 3), (scores, names))
 
 
 class SelectionTests(unittest.TestCase):
