@@ -250,6 +250,9 @@ class MinigameUI(CanvasUIFramework):
         self.next_audio_started = False
         self.ending_audio_deadline = 0.0
         self.ending_audio_started = False
+        self.title_audio_deadline = 0.0
+        self.title_audio_started = False
+        self.ci_deadline = 0.0
         self.total_result_time_item = None
         self.total_result_time_shown = None
         self.total_result_value_item = None
@@ -381,7 +384,7 @@ class MinigameUI(CanvasUIFramework):
         self.audio = AudioPlayer()
         self._load_assets()
         self.root.bind("<KeyPress>", self._handle_key)
-        self.root.after(0, self.show_title)
+        self.root.after(0, self.show_ci)
         self.root.after(16, self._animate)
         self.root.after(25, self._poll_serial)
 
@@ -414,6 +417,8 @@ class MinigameUI(CanvasUIFramework):
             "entry_cancel": ("generic", "entry_cancel.png"),
             "entry_guest": ("generic", "entry_guest.png"),
             "warning": ("generic", "warn.png"),
+            "gameengine": ("generic", "gameengine.png"),
+            "produced": ("generic", "produced.png"),
             "select_bg": ("music_select", "select_music_bg.png"),
             "select_icon": ("music_select", "select_icon.png"),
             "down_button": ("music_select", "down_bt.png"),
@@ -607,6 +612,8 @@ class MinigameUI(CanvasUIFramework):
 
     def show_title(self, fade_in=False):
         self.scene = "title"
+        self.title_audio_started = False
+        self.title_audio_deadline = time.monotonic() + 68.5
         self.entry_choice = None
         self.fade_started = None
         self.title_fade_started = None
@@ -617,11 +624,32 @@ class MinigameUI(CanvasUIFramework):
         self.transition_phase = None
         self._build_scene()
         self.scene_started = time.monotonic()
+        self.title_audio_deadline = self.scene_started + 68.5
         if fade_in:
             self._create_fade_overlay(1.0)
             self.title_fade_started = self.scene_started
-        self.root.after(80, lambda: self._play_scene_audio("title", "title.mp3", loop=True, fade_ms=500))
+        self.root.after(80, self._play_title_audio)
         self._print(f"title visible, mode: {self.settings['mode']}, track: {self._track_key()}")
+
+    def _play_title_audio(self):
+        if not self.running or self.scene != "title":
+            return
+        self.title_audio_started = True
+        self.title_audio_deadline = time.monotonic() + 68.5
+        self.audio.play(os.path.join(self.bgm_root, "title.mp3"), fade_ms=500)
+
+    def show_ci(self, fade_in=False):
+        self.scene = "ci"
+        self.entry_title_fade_started = None
+        self.title_fade_started = None
+        self._build_scene()
+        self.scene_started = time.monotonic()
+        self.ci_deadline = self.scene_started + 4.0
+        if fade_in:
+            self._create_fade_overlay(1.0)
+            self.title_fade_started = self.scene_started
+        self.root.after(80, lambda: self._play_sfx("ci.wav") if self.scene == "ci" else None)
+        self._print("title intermission visible, duration: 4 seconds")
 
     def show_entry(self):
         self.scene = "entry"
@@ -691,7 +719,7 @@ class MinigameUI(CanvasUIFramework):
         self.entry_title_fade_started = time.monotonic()
         self.audio.stop(650)
         self._create_fade_overlay(0.0)
-        self._print("entry to title fade started")
+        self._print("entry to title intermission fade started")
 
     def show_warning(self):
         if self.scene != "entry":
@@ -1032,6 +1060,10 @@ class MinigameUI(CanvasUIFramework):
             self._build_game()
             return
         self._image("top_gradient", 0, 0, anchor="nw", tags=("background",))
+        if self.scene == "ci":
+            self._build_header()
+            self._build_ci()
+            return
         self._build_common_background()
         if self.scene == "title":
             self._build_title()
@@ -1107,6 +1139,7 @@ class MinigameUI(CanvasUIFramework):
             track_label = f"TRACK {track_label}"
         labels = {
             "title": ("TWO", "BTN"),
+            "ci": ("TWO", "BTN"),
             "entry": ("ENTRY", ""),
             "warning": ("", ""),
             "title_select": (track_label, "SELECT"),
@@ -1133,6 +1166,15 @@ class MinigameUI(CanvasUIFramework):
         self._image("title_logo", 540, 1000, tags=("title",))
         self._text_image("PRESS EITHER BUTTON", 36, 540, 1300, tags=("title",))
         self._text_image("© sujeb2 2022-2026", 14, 540, 1880, tags=("title",))
+
+    def _build_ci(self):
+        self._image("logo", 540, 270, tags=("ci",))
+        self.canvas.create_rectangle(
+            self._x(0), self._y(440), self._x(DESIGN_WIDTH), self._y(DESIGN_HEIGHT),
+            fill="black", outline="", tags=("ci",),
+        )
+        self._image("produced", 540, 1050, tags=("ci",))
+        self._image("gameengine", 540, 1330, tags=("ci",))
 
     def _entry_card_sources(self, name="entry"):
         if name in self.entry_card_source_frames:
@@ -1863,7 +1905,7 @@ class MinigameUI(CanvasUIFramework):
             eased = progress * progress * (3 - 2 * progress)
             self._set_fade_opacity(eased)
             if progress >= 1.0:
-                self.show_title(fade_in=True)
+                self.show_ci(fade_in=True)
             return
         if self.entry_choice is not None:
             elapsed = now - self.entry_choice_started
@@ -2054,6 +2096,23 @@ class MinigameUI(CanvasUIFramework):
         audio_finished = self.ending_audio_started and self.audio.available and not self.audio.is_playing()
         fallback_finished = now >= self.ending_audio_deadline
         if self.loading_phase is None and (audio_finished or fallback_finished):
+            self._start_loading("ci", self.show_ci)
+
+    def _animate_title(self, now):
+        self._animate_title_fade(now)
+        audio_finished = self.title_audio_started and self.audio.available and not self.audio.is_playing()
+        fallback_finished = self.title_audio_started and now >= self.title_audio_deadline
+        if (
+            self.loading_phase is None
+            and self.title_entry_morph_started is None
+            and self.title_fade_started is None
+            and (audio_finished or fallback_finished)
+        ):
+            self._start_loading("ci", self.show_ci)
+
+    def _animate_ci(self, now):
+        self._animate_title_fade(now)
+        if self.loading_phase is None and self.title_fade_started is None and now >= self.ci_deadline:
             self._start_loading("title", self.show_title)
 
     def _animate_title_fade(self, now):
@@ -2096,7 +2155,9 @@ class MinigameUI(CanvasUIFramework):
         if self.transition_phase is not None:
             self._animate_transition(now)
         elif self.scene == "title":
-            self._animate_title_fade(now)
+            self._animate_title(now)
+        elif self.scene == "ci":
+            self._animate_ci(now)
         elif self.scene == "entry":
             self._animate_entry(now)
             self._animate_title_entry_morph(now)
