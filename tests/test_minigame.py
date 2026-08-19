@@ -4,8 +4,11 @@ import unittest
 from types import SimpleNamespace
 
 from game.minigame import (
+    AudioPlayer,
     EVENT_TRACK_COUNT,
     MAX_SCORE,
+    MinigameUI,
+    calculate_catch_score,
     calculate_score,
     combo_after_judgement,
     event_result_destination,
@@ -16,7 +19,14 @@ from game.minigame import (
     load_progress,
     save_progress,
 )
-from game.osu_chart import UnsupportedOsuChartError, discover_osu_mania_2k, parse_osu_mania_2k
+from game.osu_chart import (
+    ChartNote,
+    UnsupportedOsuChartError,
+    discover_osu_mania_2k,
+    discover_osu_supported,
+    parse_osu_catch,
+    parse_osu_mania_2k,
+)
 
 
 class ScoreTests(unittest.TestCase):
@@ -26,6 +36,10 @@ class ScoreTests(unittest.TestCase):
     def test_score_uses_chart_note_count(self):
         judgements = ["perfect", "good", "bad", "miss"]
         self.assertEqual(calculate_score(judgements, 4), 4275)
+
+    def test_catch_score_uses_chart_object_count(self):
+        self.assertEqual(calculate_catch_score(113, 226), 4500)
+        self.assertEqual(calculate_catch_score(226, 226), MAX_SCORE)
 
     def test_clear_requires_five_percent_health(self):
         self.assertFalse(is_clear(0))
@@ -43,6 +57,83 @@ class ScoreTests(unittest.TestCase):
         self.assertEqual(hold_tick_times(1.0, 2.0), (1.25, 1.5, 1.75, 2.0))
         self.assertEqual(hold_tick_times(1.0, None), ())
 
+    def test_catch_and_miss_update_combo_health_and_score(self):
+        game = MinigameUI.__new__(MinigameUI)
+        game.resolved_notes = set()
+        game.judgements = []
+        game.counts = {"catch": 0, "miss": 0}
+        game.health = 100.0
+        game.display_health = 100.0
+        game.combo = 0
+        game.max_combo = 0
+        game.combo_animation_started = None
+        game.combo_frame_shown = -1
+        game.combo_photo_cache = {}
+        game.game_mode = "catch"
+        game.catch_combo_item = None
+        game.combo_item = None
+        game.catch_score_item = None
+        game.score_item = None
+        game.note_items = {}
+        bursts = []
+        game._start_catch_burst = lambda x, y: bursts.append((x, y))
+        game.track = SimpleNamespace(notes=tuple(ChartNote(float(index), 0) for index in range(6)))
+        for index in range(5):
+            game._resolve_catch(index, True)
+        self.assertEqual((game.combo, game.score, game.counts["catch"]), (5, 7500, 5))
+        self.assertEqual(len(bursts), 1)
+        game._resolve_catch(5, False)
+        self.assertEqual((game.combo, game.health, game.counts["miss"]), (0, 93.0, 1))
+
+    def test_catcher_uses_momentum_instead_of_fixed_steps(self):
+        positions = []
+        game = MinigameUI.__new__(MinigameUI)
+        game.catcher_x = 540.0
+        game.catcher_velocity = 0.0
+        game.catcher_last_update = None
+        game.catcher_item = 1
+        game.canvas = SimpleNamespace(coords=lambda item, x, y: positions.append(x))
+        game._x = lambda value: value
+        game._y = lambda value: value
+        game._move_catcher(1)
+        started = game.catcher_last_update
+        self.assertEqual(game.catcher_x, 540.0)
+        self.assertEqual(game.catcher_velocity, 520.0)
+        game._animate_catcher(started + 0.05)
+        self.assertGreater(game.catcher_x, 540.0)
+        self.assertGreater(game.catcher_velocity, 0.0)
+        self.assertLess(game.catcher_velocity, 520.0)
+        previous = game.catcher_x
+        game._animate_catcher(started + 0.10)
+        self.assertGreater(game.catcher_x, previous)
+        self.assertTrue(positions)
+
+
+class AudioTests(unittest.TestCase):
+    def test_song_preview_starts_from_chart_preview_time(self):
+        calls = []
+        music = SimpleNamespace(
+            load=lambda path: calls.append(("load", path)),
+            play=lambda *args: calls.append(("play", args)),
+            stop=lambda: None,
+            fadeout=lambda milliseconds: None,
+        )
+        player = AudioPlayer.__new__(AudioPlayer)
+        player.available = True
+        player.current_path = None
+        player.pygame = SimpleNamespace(mixer=SimpleNamespace(music=music))
+        player._print = lambda message: None
+        with tempfile.NamedTemporaryFile() as audio:
+            player.play(audio.name, fade_ms=260, start_seconds=40.16)
+        self.assertEqual(calls[-1], ("play", (0, 40.16, 260)))
+
+    def test_gameplay_uses_actual_mixer_position(self):
+        game = MinigameUI.__new__(MinigameUI)
+        game.game_audio_started = True
+        game.game_started = 0.0
+        game.audio = SimpleNamespace(position_seconds=lambda: 12.345)
+        self.assertEqual(game._game_elapsed(), 12.345)
+
 
 class OsuChartTests(unittest.TestCase):
     def setUp(self):
@@ -50,6 +141,9 @@ class OsuChartTests(unittest.TestCase):
         self.audio_path = os.path.join(self.directory.name, "audio.mp3")
         with open(self.audio_path, "wb") as file:
             file.write(b"audio")
+        for filename in ("background.jpg", "video.mp4"):
+            with open(os.path.join(self.directory.name, filename), "wb") as file:
+                file.write(b"media")
 
     def tearDown(self):
         self.directory.cleanup()
@@ -59,10 +153,11 @@ class OsuChartTests(unittest.TestCase):
         with open(path, "w", encoding="utf-8") as file:
             file.write(
                 "osu file format v126\n"
-                "[General]\nAudioFilename: audio.mp3\nAudioLeadIn: 0\nMode: 3\n"
+                "[General]\nAudioFilename: audio.mp3\nAudioLeadIn: 0\nPreviewTime: 1250\nMode: 3\n"
                 "[Metadata]\nTitle:Test Song\nArtist:Test Artist\nCreator:Mapper\nVersion:Test 2K\n"
                 f"[Difficulty]\nHPDrainRate:5\nCircleSize:{circle_size}\nOverallDifficulty:8\n"
-                "[Events]\nSprite,Foreground,Centre,storyboard.png,320,240\n"
+                "[Events]\n0,0,\"background.jpg\",0,0\nVideo,500,\"video.mp4\"\n"
+                "Sprite,Foreground,Centre,storyboard.png,320,240\n"
                 "256,192,999,1,0,0:0:0:0:\n"
                 "[HitObjects]\n64,192,1000,1,0,0:0:0:0:\n"
                 "448,192,1500,128,0,2000:0:0:0:0:\n"
@@ -75,6 +170,10 @@ class OsuChartTests(unittest.TestCase):
         self.assertEqual(chart.title, "Test Song")
         self.assertEqual([(note.time, note.lane) for note in chart.notes], [(1.0, 0), (1.5, 1)])
         self.assertEqual(chart.notes[1].end_time, 2.0)
+        self.assertEqual(chart.preview_time, 1250)
+        self.assertEqual(chart.background_path, os.path.join(self.directory.name, "background.jpg"))
+        self.assertEqual(chart.video_path, os.path.join(self.directory.name, "video.mp4"))
+        self.assertEqual(chart.video_start_time, 500)
 
     def test_non_2k_chart_is_rejected(self):
         with self.assertRaises(UnsupportedOsuChartError):
@@ -85,6 +184,39 @@ class OsuChartTests(unittest.TestCase):
         self.assertEqual(len(charts), 1)
         self.assertEqual(len(rejected), 1)
         self.assertEqual(charts[0].difficulty, "Learn 2 Alternate!")
+
+    def test_v126_catch_chart_uses_horizontal_hit_object_position(self):
+        path = os.path.join(self.directory.name, "catch.osu")
+        with open(path, "w", encoding="utf-8") as file:
+            file.write(
+                "osu file format v126\n"
+                "[General]\nAudioFilename: audio.mp3\nAudioLeadIn: 0\nMode: 2\n"
+                "[Metadata]\nTitle:Catch Song\nArtist:Test Artist\nCreator:Mapper\nVersion:Catch\n"
+                "[Difficulty]\nHPDrainRate:5\nCircleSize:5\nOverallDifficulty:7\nSliderMultiplier:1.4\n"
+                "[TimingPoints]\n0,500,4,2,1,60,1,0\n"
+                "[Events]\nSprite,Foreground,Centre,storyboard.png,320,240\n"
+                "[HitObjects]\n64,192,1000,1,0,0:0:0:0:\n"
+                "448,192,1500,1,0,0:0:0:0:\n"
+            )
+        chart = parse_osu_catch(path)
+        self.assertEqual(chart.mode, 2)
+        self.assertEqual([(note.time, note.x) for note in chart.notes], [(1.0, 64), (1.5, 448)])
+
+    def test_supported_discovery_separates_2k_and_catch(self):
+        catch_path = os.path.join(self.directory.name, "catch.osu")
+        with open(catch_path, "w", encoding="utf-8") as file:
+            file.write(
+                "osu file format v126\n"
+                "[General]\nAudioFilename: audio.mp3\nMode: 2\n"
+                "[Metadata]\nTitle:Catch\nVersion:Catch\n"
+                "[Difficulty]\nCircleSize:5\nOverallDifficulty:5\n"
+                "[HitObjects]\n256,192,1000,1,0,0:0:0:0:\n"
+            )
+        self._write_chart()
+        charts, rejected = discover_osu_supported(self.directory.name)
+        self.assertEqual(len(charts["2k"]), 1)
+        self.assertEqual(len(charts["catch"]), 1)
+        self.assertEqual(rejected, ())
 
 
 class ProgressTests(unittest.TestCase):

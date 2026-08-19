@@ -6,9 +6,9 @@ import queue
 import time
 from datetime import datetime
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageTk
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps, ImageTk
 
-from game.osu_chart import discover_osu_mania_2k
+from game.osu_chart import discover_osu_supported
 from ui_framework import CanvasUIFramework, DESIGN_HEIGHT, DESIGN_WIDTH, find_compiled_dir
 
 
@@ -39,6 +39,12 @@ def calculate_score(judgements, note_count):
         return 0
     weighted = sum(JUDGEMENT_WEIGHT.get(judgement, 0.0) for judgement in judgements)
     return min(MAX_SCORE, max(0, round(MAX_SCORE * weighted / note_count)))
+
+
+def calculate_catch_score(catches, note_count):
+    if note_count <= 0:
+        return 0
+    return min(MAX_SCORE, max(0, round(MAX_SCORE * catches / note_count)))
 
 
 def is_clear(health):
@@ -157,7 +163,7 @@ class AudioPlayer:
         timestamp = datetime.now().strftime("%H:%M:%S")
         print(f"[{timestamp}] [minigame] {message}")
 
-    def play(self, path, loop=False, fade_ms=0):
+    def play(self, path, loop=False, fade_ms=0, start_seconds=0.0):
         self.stop()
         if not self.available or not os.path.isfile(path):
             if not os.path.isfile(path):
@@ -165,7 +171,9 @@ class AudioPlayer:
             return
         try:
             self.pygame.mixer.music.load(path)
-            self.pygame.mixer.music.play(-1 if loop else 0, fade_ms=max(0, fade_ms))
+            self.pygame.mixer.music.play(
+                -1 if loop else 0, max(0.0, float(start_seconds)), max(0, fade_ms),
+            )
             self.current_path = path
             self._print(f"[AudioManager] playing audio: {os.path.basename(path)}")
         except Exception as error:
@@ -206,6 +214,15 @@ class AudioPlayer:
         except Exception:
             return False
 
+    def position_seconds(self):
+        if not self.available:
+            return None
+        try:
+            position = self.pygame.mixer.music.get_pos()
+            return position / 1000.0 if position >= 0 else None
+        except Exception:
+            return None
+
     def close(self):
         if not self.available:
             return
@@ -221,12 +238,15 @@ class MinigameUI(CanvasUIFramework):
         self.settings = self._load_settings(config_path)
         super().__init__("SMUSH MINIGAME", fullscreen=fullscreen)
         charts_root = os.path.join(self.base, self.settings["charts_root"])
-        self.charts, rejected = discover_osu_mania_2k(charts_root, self.settings["event_chart_folders"])
+        self.charts_by_mode, rejected = discover_osu_supported(charts_root, self.settings["event_chart_folders"])
         for path, reason in rejected:
             self._print(f"[ChartManager] chart skipped: {os.path.basename(path)} ({reason})")
-        if not self.charts:
+        if not any(self.charts_by_mode.values()):
             self.root.destroy()
-            raise RuntimeError(f"[ChartManager] No valid osu!mania 2K chart was found in {charts_root}")
+            raise RuntimeError(f"[ChartManager] No valid 2K or catch chart was found in {charts_root}")
+        self.game_mode = "2k" if self.charts_by_mode["2k"] else "catch"
+        self.mode_index = 0 if self.game_mode == "2k" else 1
+        self.charts = self.charts_by_mode[self.game_mode]
         self.song_groups = group_charts_by_song(self.charts)
         self.progress_path = progress_path or os.path.join(self.base, self.settings["progress_file"])
         self.track_index = load_progress(self.progress_path, EVENT_TRACK_COUNT)
@@ -242,6 +262,7 @@ class MinigameUI(CanvasUIFramework):
         self.entry_deadline = 0.0
         self.entry_choice_deadline = 0.0
         self.warning_deadline = 0.0
+        self.mode_select_deadline = 0.0
         self.result_deadline = 0.0
         self.total_result_deadline = 0.0
         self.result_unlock_at = 0.0
@@ -293,6 +314,7 @@ class MinigameUI(CanvasUIFramework):
         self.fade_item = None
         self.fade_photo_cache = {}
         self.game_started = None
+        self.game_audio_started = False
         self.game_audio_job = None
         self.resolved_notes = set()
         self.judgements = []
@@ -337,6 +359,17 @@ class MinigameUI(CanvasUIFramework):
         self.title_entry_logo_frames = ()
         self.title_entry_logo_frame_shown = -1
         self.select_fade_in_started = None
+        self.select_preview_deadline = 0.0
+        self.select_preview_started = False
+        self.select_preview_started_at = 0.0
+        self.select_preview_key = None
+        self.select_media_item = None
+        self.select_media_photo = None
+        self.select_media_path = None
+        self.select_video = None
+        self.select_video_cv2 = None
+        self.select_video_frame_interval = 1 / 30
+        self.select_video_next_frame = 0.0
         self.selection_scroll_started = None
         self.selection_old_offset = 0.0
         self.selection_new_offset = 0.0
@@ -361,6 +394,16 @@ class MinigameUI(CanvasUIFramework):
         self.warning_frame_shown = -1
         self.warning_source_frames = ()
         self.warning_select_source_frames = ()
+        self.warning_mode_source_frames = ()
+        self.mode_time_item = None
+        self.mode_time_shown = None
+        self.mode_icon_item = None
+        self.mode_icon_frames = ()
+        self.mode_icon_frame_shown = -1
+        self.mode_icon_animation_started = None
+        self.mode_morph_in_started = None
+        self.mode_morph_in_offset = 0.0
+        self.mode_description_item = None
         self.next_arrow_items = []
         self.next_arrow_frames = ()
         self.result_card_offset = 0.0
@@ -381,6 +424,15 @@ class MinigameUI(CanvasUIFramework):
         self.transition_phase = None
         self.transition_started = 0.0
         self.curtain_items = ()
+        self.catcher_x = 540.0
+        self.catcher_velocity = 0.0
+        self.catcher_last_update = None
+        self.catcher_item = None
+        self.catch_combo_item = None
+        self.catch_score_item = None
+        self.catch_bursts = []
+        self.catch_burst_frames = ()
+        self.catch_burst_source_frames = ()
         self.audio = AudioPlayer()
         self._load_assets()
         self.root.bind("<KeyPress>", self._handle_key)
@@ -424,6 +476,10 @@ class MinigameUI(CanvasUIFramework):
             "down_button": ("music_select", "down_bt.png"),
             "previous": ("music_select", "prev_music.png"),
             "next_arrow": ("music_select", "next_arrow.png"),
+            "mode_bg": ("mode_select", "mode_bg.png"),
+            "mode_2k": ("mode_select", "mode_2k.png"),
+            "mode_catch": ("mode_select", "mode_catch.png"),
+            "mode_button": ("mode_select", "down_bt.png"),
             "main_layer": ("game", "main_layer.png"),
             "note_0": ("game", "note1.png"),
             "note_1": ("game", "note2.png"),
@@ -434,6 +490,8 @@ class MinigameUI(CanvasUIFramework):
             "good": ("game", "good.png"),
             "bad": ("game", "bad.png"),
             "miss": ("game", "miss.png"),
+            "catcher": ("game", "catch", "catch.png"),
+            "catch_object": ("game", "catch", "object.png"),
             "result_bg": ("result", "result_info_bg.png"),
             "result_down_button": ("result", "down_bt.png"),
             "total_result_layout": ("result", "total_result_layout.png"),
@@ -444,6 +502,10 @@ class MinigameUI(CanvasUIFramework):
             name: Image.open(os.path.join(image_root, *parts)).convert("RGBA")
             for name, parts in paths.items()
         }
+        self.sources["mode_catch"].thumbnail((360, 250), Image.Resampling.LANCZOS)
+        self.sources["catcher"].thumbnail((280, 176), Image.Resampling.LANCZOS)
+        self.sources["catch_object"].thumbnail((96, 96), Image.Resampling.LANCZOS)
+        self.sources["catch_line"] = self.sources["line"].resize((1000, 33), Image.Resampling.LANCZOS)
         gradient = Image.new("RGBA", (1, 2))
         gradient.putpixel((0, 0), (115, 82, 166, 255))
         gradient.putpixel((0, 1), (198, 158, 244, 255))
@@ -457,11 +519,13 @@ class MinigameUI(CanvasUIFramework):
             for y in range(sweep.height):
                 sweep_pixels[x, y] = (248, 226, 255, alpha)
         self.sources["select_sweep"] = sweep
+        for name in ("particle", "scroll"):
+            dimmed = self.sources[name].copy()
+            alpha = dimmed.getchannel("A").point(lambda value: round(value * 0.24))
+            dimmed.putalpha(alpha)
+            self.sources[f"catch_{name}"] = dimmed
         self.bgm_root = os.path.join(self.base, "game", "bgm")
         self.sfx_root = os.path.join(self.bgm_root, "sfx")
-        self.select_bgm = "music_select.mp3"
-        if not os.path.isfile(os.path.join(self.bgm_root, self.select_bgm)):
-            self.select_bgm = os.path.join("finale", "music_select.mp3")
 
     def _print(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -474,6 +538,7 @@ class MinigameUI(CanvasUIFramework):
         self.event_queue.put(("status", status))
 
     def close(self):
+        self._close_select_video()
         self.audio.close()
         super().close()
 
@@ -490,6 +555,7 @@ class MinigameUI(CanvasUIFramework):
             or self.loading_phase is not None
             or self.entry_title_fade_started is not None
             or self.title_entry_morph_started is not None
+            or self.mode_morph_in_started is not None
         ):
             return
         if self.scene == "title":
@@ -503,6 +569,11 @@ class MinigameUI(CanvasUIFramework):
                 self._show_entry_choice("guest")
             else:
                 self._show_entry_choice("cancel")
+        elif self.scene == "mode_select":
+            if lane == 0:
+                self._cycle_mode()
+            else:
+                self._confirm_mode()
         elif self.scene == "select":
             if (
                 self.select_fade_in_started is not None
@@ -518,7 +589,10 @@ class MinigameUI(CanvasUIFramework):
                 self._play_sfx("ok.wav")
                 self.show_next()
         elif self.scene == "game":
-            self._judge(lane)
+            if self.game_mode == "catch":
+                self._move_catcher(lane)
+            else:
+                self._judge(lane)
         elif self.scene == "result":
             self.start_result_transition()
         elif self.scene == "total_result" and lane == 1:
@@ -529,6 +603,72 @@ class MinigameUI(CanvasUIFramework):
         self.difficulty_index = 0
         self.selection_phase = "song"
         self.track = self.song_groups[0][0]
+
+    def _apply_game_mode(self, mode):
+        charts = self.charts_by_mode[mode]
+        if not charts:
+            return False
+        self.game_mode = mode
+        self.charts = charts
+        self.song_groups = group_charts_by_song(charts)
+        self._reset_selection()
+        return True
+
+    def _cycle_mode(self):
+        if self.mode_icon_animation_started is not None:
+            return
+        self._play_sfx("cursor_select.wav")
+        previous_index = self.mode_index
+        self.mode_index = (self.mode_index + 1) % 2
+        previous_source = self.sources["mode_2k" if previous_index == 0 else "mode_catch"]
+        source = self.sources["mode_2k" if self.mode_index == 0 else "mode_catch"]
+        frames = []
+        for index in range(24):
+            progress = index / 23
+            eased = progress * progress * (3 - 2 * progress)
+            if progress < 0.72:
+                scale = 0.62 + 0.45 * (1 - pow(1 - progress / 0.72, 3))
+            else:
+                scale = 1.07 + (1.0 - 1.07) * ((progress - 0.72) / 0.28)
+            width = max(1, round(source.width * scale))
+            height = max(1, round(source.height * scale))
+            next_frame = source.resize((width, height), Image.Resampling.LANCZOS)
+            next_opacity = min(1.0, max(0.0, (progress - 0.08) / 0.48))
+            next_alpha = next_frame.getchannel("A").point(
+                lambda value, factor=next_opacity: round(value * factor)
+            )
+            next_frame.putalpha(next_alpha)
+            old_scale = 1.0 - 0.18 * eased
+            old_width = max(1, round(previous_source.width * old_scale))
+            old_height = max(1, round(previous_source.height * old_scale))
+            old_frame = previous_source.resize((old_width, old_height), Image.Resampling.LANCZOS)
+            old_opacity = max(0.0, 1.0 - progress / 0.62)
+            old_alpha = old_frame.getchannel("A").point(
+                lambda value, factor=old_opacity: round(value * factor)
+            )
+            old_frame.putalpha(old_alpha)
+            frame = Image.new("RGBA", (440, 300), (0, 0, 0, 0))
+            frame.alpha_composite(old_frame, ((frame.width - old_width) // 2, (frame.height - old_height) // 2))
+            frame.alpha_composite(next_frame, ((frame.width - width) // 2, (frame.height - height) // 2))
+            frames.append(self._photo(frame))
+        self.mode_icon_frames = tuple(frames)
+        self.mode_icon_frame_shown = 0
+        self.mode_icon_animation_started = time.monotonic()
+        self.canvas.itemconfigure(self.mode_icon_item, image=self.mode_icon_frames[0])
+        self._update_mode_description()
+        self._print(f"mode selected: {'2K' if self.mode_index == 0 else 'CATCH'}")
+
+    def _confirm_mode(self):
+        if self.mode_icon_animation_started is not None:
+            return
+        mode = "2k" if self.mode_index == 0 else "catch"
+        if not self._apply_game_mode(mode):
+            self._play_sfx("cursor_select.wav")
+            self.mode_select_deadline = time.monotonic() + 5.0
+            self._print(f"[ChartManager] no compatible {mode} chart was found")
+            return
+        self._play_sfx("ok.wav")
+        self._start_loading("select", self._show_initial_select)
 
     def _show_initial_select(self):
         if self.track_index == 0:
@@ -558,8 +698,25 @@ class MinigameUI(CanvasUIFramework):
         self.canvas.tag_raise(self.warning_item)
         self._print("warning to music select morph started")
 
+    def _start_warning_mode_morph(self):
+        if self.scene != "warning":
+            return
+        self.show_mode_select()
+        self.mode_morph_in_started = time.monotonic()
+        self.mode_morph_in_offset = 120.0
+        self.mode_select_deadline += 0.82
+        self.canvas.move("mode_select", 0, self.mode_morph_in_offset * self.scale)
+        self.warning_frames = tuple(self._photo(frame) for frame in self._warning_mode_sources())
+        self.warning_frame_shown = 0
+        self.warning_item = self.canvas.create_image(
+            self._x(540), self._y(1120), image=self.warning_frames[0], anchor="center", tags=("warning_mode_morph",),
+        )
+        self.canvas.tag_raise(self.warning_item)
+        self._print("warning to mode select morph started")
+
     def _cycle_selection(self):
         self._play_sfx("cursor_select.wav")
+        previous_preview = self._track_preview_key(self.track)
         if self.selection_phase == "song":
             self.song_index = (self.song_index + 1) % len(self.song_groups)
             self.difficulty_index = 0
@@ -571,6 +728,8 @@ class MinigameUI(CanvasUIFramework):
             self.track = difficulties[self.difficulty_index]
             self._print(f"[ChartManager] difficulty selected: {self.track.difficulty}")
         self._refresh_selection_list()
+        if self._track_preview_key(self.track) != previous_preview:
+            self._schedule_select_preview(1.0)
 
     def _confirm_song(self):
         self._play_sfx("ok.wav")
@@ -727,9 +886,19 @@ class MinigameUI(CanvasUIFramework):
         self.scene = "warning"
         self._build_scene()
         self.scene_started = time.monotonic()
-        self.warning_deadline = self.scene_started + 5.0
+        self.warning_deadline = self.scene_started + 3.0
         self.root.after(120, lambda: self._play_sfx("card_show.wav") if self.scene == "warning" else None)
-        self._print("warning visible, duration: 5 seconds")
+        self._print("warning visible, duration: 3 seconds")
+
+    def show_mode_select(self):
+        self.scene = "mode_select"
+        self.mode_index = 0
+        self.mode_icon_animation_started = None
+        self.mode_select_deadline = time.monotonic() + 20.0
+        self._build_scene()
+        self.scene_started = time.monotonic()
+        self.mode_select_deadline = self.scene_started + 20.0
+        self._print("mode select visible, default: 2K")
 
     def show_select(self):
         self.scene = "select"
@@ -740,10 +909,11 @@ class MinigameUI(CanvasUIFramework):
         self.select_morph_in_offset = 0.0
         self.select_deadline = time.monotonic() + self.settings["select_seconds"]
         self.select_fade_in_started = None
+        self.audio.stop(250)
         self._build_scene()
         self.scene_started = time.monotonic()
         self.select_deadline = self.scene_started + self.settings["select_seconds"]
-        self.root.after(80, lambda: self._play_scene_audio("select", self.select_bgm, loop=True, fade_ms=300))
+        self._schedule_select_preview(1.0)
         self.root.after(140, lambda: self._play_sfx("card_show.wav") if self.scene == "select" else None)
         self._print(f"music select visible, songs: {len(self.song_groups)}, track: {self._track_key()}")
 
@@ -778,6 +948,147 @@ class MinigameUI(CanvasUIFramework):
     def _play_scene_audio(self, scene, filename, loop=False, fade_ms=0):
         if self.running and self.scene == scene and not (scene == "result" and self.result_fade_started is not None):
             self.audio.play(os.path.join(self.bgm_root, filename), loop=loop, fade_ms=fade_ms)
+
+    def _track_preview_key(self, track):
+        return track.audio_path, track.preview_time, track.video_path, track.background_path
+
+    def _preview_start_seconds(self, track):
+        return max(0.0, track.preview_time / 1000.0) if track.preview_time >= 0 else 0.0
+
+    def _schedule_select_preview(self, delay):
+        if self.scene != "select":
+            return
+        self.audio.stop(180)
+        self.select_preview_started = False
+        self.select_preview_started_at = 0.0
+        self.select_preview_deadline = time.monotonic() + delay
+        self.select_preview_key = self._track_preview_key(self.track)
+        self._prepare_select_media(self.track, reset_video=True)
+
+    def _play_track_preview(self):
+        if not self.running or self.scene != "select" or self.select_preview_key != self._track_preview_key(self.track):
+            return
+        self.select_preview_started = True
+        self.audio.play(
+            self.track.audio_path, fade_ms=260, start_seconds=self._preview_start_seconds(self.track),
+        )
+        self.select_preview_started_at = time.monotonic()
+        self._seek_select_video(self.track)
+        self.select_video_next_frame = self.select_preview_started_at + self.select_video_frame_interval
+        self._print(
+            f"song preview started: {os.path.basename(self.track.audio_path)} at {max(0, self.track.preview_time)}ms"
+        )
+
+    def _selection_media_image(self, image, video):
+        image = image.convert("RGB")
+        if video:
+            image.thumbnail((170, 150), Image.Resampling.LANCZOS)
+            frame = Image.new("RGBA", (170, 150), (20, 16, 28, 255))
+            frame.paste(image.convert("RGBA"), ((170 - image.width) // 2, (150 - image.height) // 2))
+            return frame
+        square = ImageOps.fit(image, (150, 150), method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+        frame = Image.new("RGBA", (170, 150), (0, 0, 0, 0))
+        frame.paste(square.convert("RGBA"), (10, 0))
+        return frame
+
+    def _set_select_media_frame(self, image, video):
+        self.select_media_photo = self._scaled_photo(self._selection_media_image(image, video))
+        if self.select_media_item is not None:
+            self.canvas.itemconfigure(self.select_media_item, image=self.select_media_photo)
+
+    def _close_select_video(self):
+        if self.select_video is not None:
+            try:
+                self.select_video.release()
+            except Exception:
+                pass
+        self.select_video = None
+        self.select_video_cv2 = None
+
+    def _seek_select_video(self, track):
+        if self.select_video is None or self.select_video_cv2 is None:
+            return False
+        offset = max(0, round(self._preview_start_seconds(track) * 1000) - track.video_start_time)
+        self.select_video.set(self.select_video_cv2.CAP_PROP_POS_MSEC, offset)
+        success, frame = self.select_video.read()
+        if success:
+            self._set_select_media_frame(Image.fromarray(frame[:, :, ::-1]), True)
+        return success
+
+    def _prepare_select_media(self, track, reset_video=False):
+        path = track.video_path or track.background_path
+        if not path:
+            self._close_select_video()
+            self.select_media_path = None
+            self.select_media_photo = None
+            if self.select_media_item is not None:
+                self.canvas.itemconfigure(self.select_media_item, image="")
+            return
+        if path == self.select_media_path and not reset_video and self.select_media_photo is not None:
+            return
+        self._close_select_video()
+        self.select_media_path = path
+        self.select_media_photo = None
+        if track.video_path:
+            try:
+                import cv2
+
+                video = cv2.VideoCapture(track.video_path)
+                if video.isOpened():
+                    self.select_video = video
+                    self.select_video_cv2 = cv2
+                    fps = video.get(cv2.CAP_PROP_FPS)
+                    self.select_video_frame_interval = 1.0 / fps if fps and fps > 0 else 1 / 30
+                    if self._seek_select_video(track):
+                        return
+                    self._close_select_video()
+                video.release()
+            except Exception as error:
+                self._print(f"beatmap video unavailable: {error}")
+        fallback = track.background_path
+        if fallback:
+            try:
+                with Image.open(fallback) as image:
+                    self._set_select_media_frame(image.copy(), False)
+                return
+            except OSError as error:
+                self._print(f"beatmap background unavailable: {error}")
+        self.select_media_photo = None
+
+    def _animate_select_media(self, now):
+        if self.select_video is None or self.select_video_cv2 is None or now < self.select_preview_deadline:
+            return
+        if now < self.select_video_next_frame:
+            return
+        audio_elapsed = self.audio.position_seconds()
+        if audio_elapsed is None:
+            audio_elapsed = max(0.0, now - self.select_preview_started_at)
+        desired_position = max(
+            0.0,
+            (self._preview_start_seconds(self.track) + audio_elapsed) * 1000 - self.track.video_start_time,
+        )
+        current_position = self.select_video.get(self.select_video_cv2.CAP_PROP_POS_MSEC)
+        tolerance = max(80.0, self.select_video_frame_interval * 2000)
+        if abs(current_position - desired_position) > tolerance:
+            self.select_video.set(self.select_video_cv2.CAP_PROP_POS_MSEC, desired_position)
+        success, frame = self.select_video.read()
+        if success:
+            self._set_select_media_frame(Image.fromarray(frame[:, :, ::-1]), True)
+        self.select_video_next_frame += self.select_video_frame_interval
+        if self.select_video_next_frame < now:
+            self.select_video_next_frame = now + self.select_video_frame_interval
+
+    def _animate_select_preview(self, now):
+        if not self.select_preview_started and now >= self.select_preview_deadline:
+            self._play_track_preview()
+        elif (
+            self.select_preview_started
+            and self.audio.available
+            and now - self.select_preview_started_at >= 0.75
+            and not self.audio.is_playing()
+        ):
+            self._play_track_preview()
+        self._animate_select_media(now)
 
     def _play_sfx(self, filename):
         return self.audio.play_sfx(os.path.join(self.sfx_root, filename))
@@ -836,15 +1147,20 @@ class MinigameUI(CanvasUIFramework):
         self.scene_started = time.monotonic()
         pre_roll = 2.0 + self.track.audio_lead_in / 1000.0
         self.game_started = self.scene_started + pre_roll
+        self.game_audio_started = False
         self.resolved_notes = set()
         self.judgements = []
-        self.counts = {key: 0 for key in JUDGEMENT_WEIGHT}
+        self.counts = {key: 0 for key in (("catch", "miss") if self.game_mode == "catch" else JUDGEMENT_WEIGHT)}
         self.health = 100.0
         self.display_health = 100.0
         self.score = 0
         self.combo = 0
         self.max_combo = 0
         self.active_holds = {}
+        self.catcher_x = 540.0
+        self.catcher_velocity = 0.0
+        self.catcher_last_update = self.scene_started
+        self.catch_bursts = []
         self.combo_animation_started = None
         self.combo_frame_shown = -1
         self.health_animation_started = None
@@ -867,19 +1183,35 @@ class MinigameUI(CanvasUIFramework):
         self.game_audio_job = None
         if not self.running or self.scene != "game":
             return
-        self.audio.play(self.track.audio_path, fade_ms=220)
+        self.audio.play(self.track.audio_path)
+        self.game_started = time.monotonic()
+        self.game_audio_started = True
         self._print(f"chart started: {os.path.basename(self.track.path)}")
+
+    def _game_elapsed(self):
+        if self.game_audio_started:
+            position = self.audio.position_seconds()
+            if position is not None:
+                return position
+        return time.monotonic() - self.game_started
 
     def show_result(self):
         if self.scene != "game":
             return
         for index in range(len(self.track.notes)):
             if index not in self.resolved_notes:
-                self._resolve_note(index, "miss")
+                if self.game_mode == "catch":
+                    self._resolve_catch(index, False)
+                else:
+                    self._resolve_note(index, "miss")
         self.audio.stop(250)
         self.scene = "result"
         self.result_fade_started = None
-        self.score = calculate_score(self.judgements, len(self.track.notes))
+        self.score = (
+            calculate_catch_score(self.counts["catch"], len(self.track.notes))
+            if self.game_mode == "catch"
+            else calculate_score(self.judgements, len(self.track.notes))
+        )
         self.track_scores[self.track_index] = self.score
         self.track_names[self.track_index] = self.track.title
         self.result_final_counts = dict(self.counts)
@@ -992,16 +1324,21 @@ class MinigameUI(CanvasUIFramework):
     def _build_scene(self):
         if not self.running:
             return
+        if self.scene not in ("select", "title_select"):
+            self._close_select_video()
         self._prepare_scene()
         self.scene_photos = []
         self.scroll_items = []
         self.particle_item = None
         self.fade_item = None
         self.select_time_item = None
+        self.select_media_item = None
+        self.mode_time_item = None
         self.entry_time_item = None
         self.result_time_item = None
         self.total_result_time_item = None
         self.select_time_shown = None
+        self.mode_time_shown = None
         self.entry_time_shown = None
         self.result_time_shown = None
         self.total_result_time_shown = None
@@ -1035,11 +1372,23 @@ class MinigameUI(CanvasUIFramework):
         self.warning_item = None
         self.warning_frames = ()
         self.warning_frame_shown = -1
+        self.mode_icon_item = None
+        self.mode_icon_frames = ()
+        self.mode_icon_frame_shown = -1
+        self.mode_icon_animation_started = None
+        self.mode_morph_in_started = None
+        self.mode_morph_in_offset = 0.0
+        self.mode_description_item = None
         self.next_arrow_items = []
         self.result_value_items = {}
         self.result_values_shown = {}
         self.combo_label_item = None
         self.combo_item = None
+        self.catch_combo_item = None
+        self.catch_score_item = None
+        self.catcher_item = None
+        self.catch_bursts = []
+        self.catch_burst_frames = ()
         self.health_fill_item = None
         self.health_dynamic_photo = None
         self.health_visible_state = None
@@ -1071,6 +1420,8 @@ class MinigameUI(CanvasUIFramework):
             self._build_entry()
         elif self.scene == "warning":
             self._build_warning()
+        elif self.scene == "mode_select":
+            self._build_mode_select()
         elif self.scene == "title_select":
             self._build_title_select_morph()
         elif self.scene == "select":
@@ -1142,6 +1493,7 @@ class MinigameUI(CanvasUIFramework):
             "ci": ("TWO", "BTN"),
             "entry": ("ENTRY", ""),
             "warning": ("", ""),
+            "mode_select": ("MODE", "SELECT"),
             "title_select": (track_label, "SELECT"),
             "select": (track_label, "SELECT"),
             "next": (track_label, "NEXT"),
@@ -1253,6 +1605,23 @@ class MinigameUI(CanvasUIFramework):
         self.warning_select_source_frames = tuple(frames)
         return self.warning_select_source_frames
 
+    def _warning_mode_sources(self):
+        if self.warning_mode_source_frames:
+            return self.warning_mode_source_frames
+        warning_source = self.sources["warning"]
+        mode_source = self.sources["mode_bg"]
+        frames = []
+        for index in range(30):
+            progress = index / 29
+            eased = progress * progress * (3 - 2 * progress)
+            width = round(warning_source.width + (mode_source.width - warning_source.width) * eased)
+            height = round(warning_source.height + (mode_source.height - warning_source.height) * eased)
+            warning_frame = warning_source.resize((width, height), Image.Resampling.LANCZOS)
+            mode_frame = mode_source.resize((width, height), Image.Resampling.LANCZOS)
+            frames.append(Image.blend(warning_frame, mode_frame, eased))
+        self.warning_mode_source_frames = tuple(frames)
+        return self.warning_mode_source_frames
+
     def _build_entry(self):
         self._image("logo", 540, 270, tags=("entry",))
         self._text_image("ENTRY", 54, 70, 755, anchor="w", tags=("entry",))
@@ -1271,6 +1640,38 @@ class MinigameUI(CanvasUIFramework):
         self.warning_item = self.canvas.create_image(
             self._x(540), self._y(1120), image=self.warning_frames[0], anchor="center", tags=("warning_card",),
         )
+
+    def _mode_description_photo(self):
+        text = (
+            "두 개의 버튼을 이용하여서 노트를 처리하는 모드"
+            if self.mode_index == 0
+            else "떨어지는 물건을 받아 처리하는 모드"
+        )
+        photo = self._text_photo(
+            text, round(27 * TEXT_SCALE), color="white", font_path=self.display_font_path, align="center",
+        )
+        self.scene_photos.append(photo)
+        return photo
+
+    def _update_mode_description(self):
+        if self.mode_description_item is not None:
+            self.canvas.itemconfigure(self.mode_description_item, image=self._mode_description_photo())
+
+    def _build_mode_select(self):
+        self._image("logo", 540, 270, tags=("mode_select",))
+        self._text_image("MODE SELECT", 54, 70, 755, anchor="w", tags=("mode_select",))
+        self._text_image("TIME LEFT", 18, 970, 725, tags=("mode_select",))
+        remaining = max(0, int(self.mode_select_deadline - time.monotonic() + 0.999))
+        self.mode_time_item = self._text_image(str(remaining), 52, 970, 780, tags=("mode_select",))
+        self.mode_time_shown = remaining
+        self._image("mode_bg", 0, 1015, anchor="nw", tags=("mode_select",))
+        icon_name = "mode_2k" if self.mode_index == 0 else "mode_catch"
+        self.mode_icon_item = self._image(icon_name, 540, 1160, tags=("mode_select", "mode_icon"))
+        self._text_image("MODE DESCRIPTION", 29, 540, 1425, tags=("mode_select",))
+        self.mode_description_item = self.canvas.create_image(
+            self._x(540), self._y(1490), image=self._mode_description_photo(), tags=("mode_select",),
+        )
+        self._image("mode_button", 540, 1815, tags=("mode_select",))
 
     def _build_title_select_morph(self):
         logo_frames = []
@@ -1348,9 +1749,24 @@ class MinigameUI(CanvasUIFramework):
             label = choices[choice_index]
             self._image("previous", x, y, tags=tags)
             self._text_image(label.upper(), 27, x, y, color="#ead7fb", tags=tags)
-        self._text_image(self.track.title.upper(), 40, 100, 1228, anchor="w", tags=tags)
+        self._prepare_select_media(self.track)
+        has_media = self.select_media_photo is not None
+        if has_media:
+            self.canvas.create_rectangle(
+                self._x(82), self._y(1152), self._x(268), self._y(1278),
+                fill="#5b416f", outline="#f7eaff", width=max(1, round(3 * self.scale)), tags=tags,
+            )
+            self.select_media_item = self.canvas.create_image(
+                self._x(90), self._y(1175), image=self.select_media_photo, anchor="nw", tags=tags,
+            )
+        title_size = 38 if len(self.track.title) <= 20 else max(25, round(38 * 20 / len(self.track.title)))
         detail = self.track.artist if self.selection_phase == "song" else self.track.difficulty
-        self._text_image(detail.upper(), 26, 100, 1295, anchor="w", tags=tags)
+        if has_media:
+            self._text_image(self.track.title.upper(), title_size, 290, 1200, anchor="nw", tags=tags)
+            self._text_image(detail.upper(), 26, 290, 1265, anchor="nw", tags=tags)
+        else:
+            self._text_image(self.track.title.upper(), title_size, 100, 1288, anchor="w", tags=tags)
+            self._text_image(detail.upper(), 26, 100, 1295, anchor="w", tags=tags)
         self._text_image(str(self.track.level), 92, 930, 1230, tags=tags)
         self._text_image("LEVEL", 21, 930, 1305, tags=tags)
 
@@ -1391,7 +1807,10 @@ class MinigameUI(CanvasUIFramework):
         right_item = self.canvas.create_image(self._x(715), self._y(900), image=frames[1][0], anchor="center", tags=("next",))
         self.next_arrow_items = [left_item, right_item]
 
-    def _build_game(self):
+    def _build_game(self): # game ui
+        if self.game_mode == "catch":
+            self._build_catch_game()
+            return
         self.note_items = {}
         self.canvas.create_rectangle(
             self._x(0), self._y(0), self._x(DESIGN_WIDTH), self._y(DESIGN_HEIGHT),
@@ -1399,11 +1818,11 @@ class MinigameUI(CanvasUIFramework):
         )
         self._image("top_gradient", 0, 0, anchor="nw", tags=("game",))
         self._build_header()
-        self._text_image("DIFFICULTY", 26, 95, 300, anchor="w", tags=("game",))
+        self._text_image("DIFFICULTY", 26, 95, 500, anchor="w", tags=("game",))
         title_size = 47 if len(self.track.title) <= 20 else max(30, round(47 * 20 / len(self.track.title)))
-        self._text_image(self.track.title.upper(), title_size, 95, 360, anchor="w", tags=("game",))
-        self._text_image("SCORE", 26, 1008, 300, anchor="e", tags=("game",))
-        self.score_item = self._text_image(str(self.score), 58, 1008, 362, anchor="e", tags=("game_score",))
+        self._text_image(self.track.title.upper(), title_size, 95, 380, anchor="w", tags=("game",))
+        self._text_image("SCORE", 26, 1008, 700, anchor="e", tags=("game",))
+        self.score_item = self._text_image(str(self.score), 58, 1008, 382, anchor="e", tags=("game_score",))
         self._image("main_layer", 290, 470, anchor="nw", tags=("game",))
         self.note_photos = (self._asset_photo("note_0"), self._asset_photo("note_1"))
         self.combo_item = self.canvas.create_image(self._x(540), self._y(790), anchor="center", tags=("game_combo",))
@@ -1418,6 +1837,47 @@ class MinigameUI(CanvasUIFramework):
             for name in JUDGEMENT_WEIGHT
         }
         self._update_health_image()
+
+    def _build_game_information(self):
+        self._image("top_gradient", 0, 0, anchor="nw", tags=("game",))
+        self._build_header()
+        self._text_image(self.track.difficulty, 26, 95, 250, anchor="w", tags=("game",)) # beatmap diff need to change
+        title_size = 47 if len(self.track.title) <= 20 else max(30, round(47 * 20 / len(self.track.title)))
+        self._text_image(self.track.title.upper(), title_size, 95, 310, anchor="w", tags=("game",))
+        self._text_image("SCORE", 26, 990, 250, anchor="e", tags=("game",))
+        self.score_item = self._text_image(str(self.score), 58, 990, 312, anchor="e", tags=("game_score",))
+
+    def _build_catch_game(self):
+        self.note_items = {}
+        self.canvas.create_rectangle(
+            self._x(0), self._y(0), self._x(DESIGN_WIDTH), self._y(DESIGN_HEIGHT),
+            fill="#8d73aa", outline="", tags=("game",),
+        )
+        self._build_game_information()
+        self.canvas.create_rectangle(
+            self._x(40), self._y(470), self._x(1040), self._y(1900),
+            fill="#a77dd1", outline="#35bdff", width=max(2, round(5 * self.scale)), tags=("catch_playfield",),
+        )
+        particle_photo = self._asset_photo("catch_particle")
+        self.canvas.create_image(
+            self._x(540), self._y(500), image=particle_photo, anchor="n", tags=("catch_background",),
+        )
+        scroll_photo = self._asset_photo("catch_scroll")
+        for y in (500, 1660):
+            self.canvas.create_image(
+                self._x(0), self._y(y), image=scroll_photo, anchor="nw", tags=("catch_background",),
+            )
+        self._image("catch_line", 40, 1850, anchor="nw", tags=("catch_line",))
+        self.catcher_item = self._image("catcher", self.catcher_x, 1725, tags=("catch_catcher",))
+        self.catch_burst_frames = tuple(self._photo(frame) for frame in self._catch_burst_sources())
+        self.catch_combo_item = self._text_image(
+            "", 80, 90, 1725, anchor="w", tags=("catch_hud", "catch_combo"),
+        )
+        self._text_image("COMBO", 27, 92, 1805, anchor="w", tags=("catch_hud",))
+        #self.catch_score_item = self._text_image(
+        #    str(self.score), 70, 985, 1745, anchor="e", tags=("catch_hud", "catch_score"),
+        #)
+        #self._text_image("SCORE", 27, 985, 1810, anchor="e", tags=("catch_hud",))
 
     def _combo_photo(self, combo, number_size):
         key = combo, number_size, round(self.scale, 5)
@@ -1554,7 +2014,11 @@ class MinigameUI(CanvasUIFramework):
         self._text_image(self.track.difficulty, 27, 115, 1210 + offset, anchor="w", tags=("result_card",))
         self._text_image(str(self.track.level), 70, 948, 1135 + offset, tags=("result_card",))
         self._text_image("LEVEL", 19, 948, 1195 + offset, tags=("result_card",))
-        labels = (("PERFECT", "#88f5ff"), ("GOOD", "#ffe35d"), ("BAD", "#ff68c7"), ("MISS", "#ff6262"))
+        labels = (
+            (("CATCH", "#88f5ff"), ("MISS", "#ff6262"))
+            if self.game_mode == "catch"
+            else (("PERFECT", "#88f5ff"), ("GOOD", "#ffe35d"), ("BAD", "#ff68c7"), ("MISS", "#ff6262"))
+        )
         for index, (label, color) in enumerate(labels):
             y = 1320 + index * 58 + offset
             self._text_image(label, 29, 116, y, color=color, anchor="w", tags=("result_card",))
@@ -1630,10 +2094,109 @@ class MinigameUI(CanvasUIFramework):
     def _scaled_box(self, box):
         return self._x(box[0]), self._y(box[1]), self._x(box[2]), self._y(box[3])
 
+    def _move_catcher(self, lane):
+        now = time.monotonic()
+        self._animate_catcher(now)
+        direction = -1 if lane == 0 else 1
+        self.catcher_velocity = min(920.0, max(-920.0, self.catcher_velocity + direction * 520.0))
+
+    def _animate_catcher(self, now):
+        if self.catcher_last_update is None:
+            self.catcher_last_update = now
+            return
+        delta = min(0.05, max(0.0, now - self.catcher_last_update))
+        self.catcher_last_update = now
+        decay = math.exp(-5.2 * delta)
+        self.catcher_x += self.catcher_velocity * (1.0 - decay) / 5.2
+        self.catcher_velocity *= decay
+        if self.catcher_x <= 180.0:
+            self.catcher_x = 180.0
+            self.catcher_velocity = max(0.0, self.catcher_velocity)
+        elif self.catcher_x >= 900.0:
+            self.catcher_x = 900.0
+            self.catcher_velocity = min(0.0, self.catcher_velocity)
+        if abs(self.catcher_velocity) < 2.0:
+            self.catcher_velocity = 0.0
+        if self.catcher_item is not None:
+            self.canvas.coords(self.catcher_item, self._x(self.catcher_x), self._y(1725))
+
+    def _catch_burst_sources(self):
+        if self.catch_burst_source_frames:
+            return self.catch_burst_source_frames
+        colors = ((255, 226, 145), (255, 157, 116), (255, 246, 218), (242, 126, 169))
+        frames = []
+        for frame_index in range(20):
+            progress = frame_index / 19
+            image = Image.new("RGBA", (180, 180), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(image)
+            alpha = round(175 * pow(1.0 - progress, 1.35))
+            distance = 12.0 + 54.0 * (1.0 - pow(1.0 - progress, 2))
+            radius = max(2, round(7.0 * (1.0 - progress)))
+            for index in range(8):
+                angle = math.tau * index / 8 + 0.18
+                x = 90 + math.cos(angle) * distance
+                y = 90 + math.sin(angle) * distance + 12 * progress * progress
+                color = (*colors[index % len(colors)], alpha)
+                draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=color)
+            ring_radius = 10 + 30 * progress
+            draw.ellipse(
+                (90 - ring_radius, 90 - ring_radius, 90 + ring_radius, 90 + ring_radius),
+                outline=(255, 235, 190, round(alpha * 0.7)), width=3,
+            )
+            frames.append(image)
+        self.catch_burst_source_frames = tuple(frames)
+        return self.catch_burst_source_frames
+
+    def _start_catch_burst(self, x, y):
+        if not self.catch_burst_frames:
+            return
+        item = self.canvas.create_image(
+            self._x(x), self._y(y), image=self.catch_burst_frames[0], anchor="center", tags=("catch_burst",),
+        )
+        self.catch_bursts.append({"item": item, "started": time.monotonic(), "frame": 0})
+
+    def _animate_catch_bursts(self, now):
+        for burst in tuple(self.catch_bursts):
+            progress = min(1.0, max(0.0, (now - burst["started"]) / 0.42))
+            frame = min(len(self.catch_burst_frames) - 1, round(progress * (len(self.catch_burst_frames) - 1)))
+            if frame != burst["frame"]:
+                self.canvas.itemconfigure(burst["item"], image=self.catch_burst_frames[frame])
+                burst["frame"] = frame
+            if progress >= 1.0:
+                self.canvas.delete(burst["item"])
+                self.catch_bursts.remove(burst)
+
+    def _resolve_catch(self, index, caught):
+        if index in self.resolved_notes:
+            return
+        self.resolved_notes.add(index)
+        judgement = "catch" if caught else "miss"
+        self.judgements.append(judgement)
+        self.counts[judgement] += 1
+        previous_health = self.health
+        if caught:
+            self.health = min(100.0, self.health + 0.55)
+            self._advance_combo()
+            if self.counts["catch"] % 5 == 0:
+                note = self.track.notes[index]
+                self._start_catch_burst(90.0 + note.x / 512.0 * 900.0, 1625.0)
+        else:
+            self.health = max(0.0, self.health - 7.0)
+            self._break_combo()
+        self.score = calculate_catch_score(self.counts["catch"], len(self.track.notes))
+        item = self.note_items.pop(index, None)
+        if item is not None:
+            self.canvas.delete(item)
+        if self.score_item is not None:
+            self.canvas.itemconfigure(self.score_item, image=self._text(str(self.score), 58))
+        if self.catch_score_item is not None:
+            self.canvas.itemconfigure(self.catch_score_item, image=self._text(str(self.score), 70))
+        self._start_health_animation(previous_health, self.health)
+
     def _judge(self, lane):
         if self.game_started is None:
             return
-        elapsed = time.monotonic() - self.game_started
+        elapsed = self._game_elapsed()
         candidates = [
             (abs(note.time - elapsed), index)
             for index, note in enumerate(self.track.notes)
@@ -1664,7 +2227,7 @@ class MinigameUI(CanvasUIFramework):
         else:
             self._advance_combo()
             note = self.track.notes[index]
-            ticks = tuple(tick for tick in hold_tick_times(note.time, note.end_time) if tick > time.monotonic() - self.game_started)
+            ticks = tuple(tick for tick in hold_tick_times(note.time, note.end_time) if tick > self._game_elapsed())
             if ticks:
                 self.active_holds[index] = {"ticks": ticks, "next": 0, "end_time": note.end_time}
         self.last_feedback = judgement
@@ -1684,7 +2247,9 @@ class MinigameUI(CanvasUIFramework):
         self.combo_animation_started = time.monotonic()
         self.combo_frame_shown = -1
         self.combo_photo_cache.clear()
-        if self.combo_item is not None:
+        if self.game_mode == "catch" and self.catch_combo_item is not None:
+            self.canvas.itemconfigure(self.catch_combo_item, image=self._text(f"x{self.combo}", 80))
+        elif self.combo_item is not None:
             self.canvas.itemconfigure(self.combo_item, image=self._combo_photo(self.combo, 70))
 
     def _break_combo(self):
@@ -1692,8 +2257,30 @@ class MinigameUI(CanvasUIFramework):
         self.combo_animation_started = None
         self.combo_frame_shown = -1
         self.combo_photo_cache.clear()
-        if self.combo_item is not None:
+        if self.game_mode == "catch" and self.catch_combo_item is not None:
+            self.canvas.itemconfigure(self.catch_combo_item, image="")
+        elif self.combo_item is not None:
             self.canvas.itemconfigure(self.combo_item, image="")
+
+    def _animate_catch_combo(self, now):
+        if self.catch_combo_item is None or self.combo <= 0:
+            return
+        if self.combo_animation_started is None:
+            size = 80
+            y = 1725.0
+        else:
+            progress = min(1.0, (now - self.combo_animation_started) / 0.28)
+            bounce = math.sin(progress * math.pi) * 22
+            size = round(80 + math.sin(progress * math.pi) * 12)
+            y = 1725.0 - bounce
+            if progress >= 1.0:
+                self.combo_animation_started = None
+        state = size, round(y, 1), self.combo
+        if state == self.combo_frame_shown:
+            return
+        self.canvas.itemconfigure(self.catch_combo_item, image=self._text(f"x{self.combo}", size))
+        self.canvas.coords(self.catch_combo_item, self._x(90), self._y(y))
+        self.combo_frame_shown = state
 
     def _animate_combo(self, now):
         if self.combo_item is None or self.combo <= 0:
@@ -1802,10 +2389,50 @@ class MinigameUI(CanvasUIFramework):
             self.canvas.itemconfigure(self.judgement_item, image=frames[frame])
             self.feedback_frame_shown = frame
 
+    def _update_catch_game_frame(self, now):
+        if self.scene != "game" or self.game_started is None:
+            return
+        elapsed = self._game_elapsed()
+        self._animate_catcher(now)
+        lead_time = 1.65
+        start_y = 520.0
+        catch_y = 1625.0
+        catcher_half_width = max(88.0, 132.0 - (self.track.circle_size - 5.0) * 10.0)
+        for index, note in enumerate(self.track.notes):
+            if index in self.resolved_notes:
+                continue
+            target_x = 90.0 + note.x / 512.0 * 900.0
+            time_until = note.time - elapsed
+            if time_until <= 0:
+                self._resolve_catch(index, abs(target_x - self.catcher_x) <= catcher_half_width)
+                continue
+            if time_until <= lead_time:
+                y = catch_y - time_until / lead_time * (catch_y - start_y)
+                if index not in self.note_items:
+                    self.note_items[index] = self.canvas.create_image(
+                        self._x(target_x), self._y(y), image=self._asset_photo("catch_object"),
+                        anchor="center", tags=("catch_note",),
+                    )
+                else:
+                    self.canvas.coords(self.note_items[index], self._x(target_x), self._y(y))
+        self.canvas.tag_raise("catch_note")
+        self.canvas.tag_raise("catch_burst")
+        self.canvas.tag_raise("catch_catcher")
+        self.canvas.tag_raise("catch_hud")
+        self._animate_catch_combo(now)
+        self._animate_catch_bursts(now)
+        if not self.game_finishing and (self.health <= 0 or elapsed >= self.track.duration + 1.2):
+            self.game_finishing = True
+            self.audio.stop(180)
+            self._start_loading("result", self.show_result)
+
     def _update_game_frame(self, now):
         if self.scene != "game" or self.game_started is None:
             return
-        elapsed = now - self.game_started
+        if self.game_mode == "catch":
+            self._update_catch_game_frame(now)
+            return
+        elapsed = self._game_elapsed()
         self._update_hold_ticks(elapsed)
         for index, note in enumerate(self.track.notes):
             if index not in self.resolved_notes and elapsed > note.time + BAD_WINDOW:
@@ -1942,7 +2569,46 @@ class MinigameUI(CanvasUIFramework):
             self.canvas.itemconfigure(self.warning_item, image=self.warning_frames[frame])
             self.warning_frame_shown = frame
         if now >= self.warning_deadline:
-            self._start_warning_select_morph()
+            self._start_warning_mode_morph()
+
+    def _animate_mode_select(self, now):
+        self._animate_warning_mode_morph(now)
+        if self.mode_icon_animation_started is not None:
+            progress = min(1.0, (now - self.mode_icon_animation_started) / 0.58)
+            frame = min(len(self.mode_icon_frames) - 1, round(progress * (len(self.mode_icon_frames) - 1)))
+            if frame != self.mode_icon_frame_shown:
+                self.canvas.itemconfigure(self.mode_icon_item, image=self.mode_icon_frames[frame])
+                self.mode_icon_frame_shown = frame
+            if progress >= 1.0:
+                self.mode_icon_animation_started = None
+                self.mode_icon_frames = ()
+        remaining = max(0, int(self.mode_select_deadline - now + 0.999))
+        self._update_timer(self.mode_time_item, remaining, "mode_time_shown")
+        if now >= self.mode_select_deadline:
+            self._confirm_mode()
+
+    def _animate_warning_mode_morph(self, now):
+        if self.mode_morph_in_started is None:
+            return
+        progress = min(1.0, (now - self.mode_morph_in_started) / 0.82)
+        eased = progress * progress * (3 - 2 * progress)
+        new_offset = 120.0 * (1.0 - eased)
+        delta = new_offset - self.mode_morph_in_offset
+        if abs(delta) > 0.001:
+            self.canvas.move("mode_select", 0, delta * self.scale)
+            self.mode_morph_in_offset = new_offset
+        frame = min(len(self.warning_frames) - 1, round(eased * (len(self.warning_frames) - 1)))
+        if frame != self.warning_frame_shown:
+            self.canvas.itemconfigure(self.warning_item, image=self.warning_frames[frame])
+            self.warning_frame_shown = frame
+        self.canvas.coords(self.warning_item, self._x(540), self._y(1120 + 32 * eased))
+        self.canvas.tag_raise(self.warning_item)
+        if progress >= 1.0:
+            self.canvas.delete(self.warning_item)
+            self.warning_item = None
+            self.warning_frames = ()
+            self.mode_morph_in_started = None
+            self.mode_morph_in_offset = 0.0
 
     def _animate_warning_select_morph(self, now):
         if self.select_morph_in_started is None:
@@ -2163,11 +2829,14 @@ class MinigameUI(CanvasUIFramework):
             self._animate_title_entry_morph(now)
         elif self.scene == "warning":
             self._animate_warning(now)
+        elif self.scene == "mode_select":
+            self._animate_mode_select(now)
         elif self.scene == "title_select":
             self._animate_title_select_morph(now)
         elif self.scene == "select":
             self._animate_warning_select_morph(now)
             self._animate_selection_scroll(now)
+            self._animate_select_preview(now)
             remaining = max(0, int(self.select_deadline - now + 0.999))
             self._update_timer(self.select_time_item, remaining, "select_time_shown")
             if now >= self.select_deadline:
