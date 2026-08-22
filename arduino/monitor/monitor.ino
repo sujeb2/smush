@@ -13,9 +13,6 @@
 #define MOTOR_STEP_B 8
 #define MOTOR_PWM 9
 
-// serial
-#define SERIAL_BAUD 9600
-
 #define TEST_UP_SW 11
 #define TEST_DOWN_SW 12
 #define TEST_UP_SW_LED 13
@@ -35,7 +32,8 @@ bool conveyorRunning = false;
 byte pendingSwitch = 0;
 
 void setup() {
-  Serial.begin(SERIAL_BAUD);
+  Serial.begin(9600);
+  Serial.println("========= IO BOARD INIT =========");
   while(!Serial);
   conveyor.setSpeedA(CONV_SPEED);
   conveyor.setSpeedB(CONV_SPEED);

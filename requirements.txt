@@ -9,3 +9,4 @@ ultralytics
 imageai
 pyinstaller
 pygame
+cx_Freeze

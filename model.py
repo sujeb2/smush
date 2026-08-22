@@ -8,8 +8,8 @@ from ultralytics import YOLO
 import configparser as cfg
 
 def findCompiledDir():
-    if "__compiled__" in globals():
-        return os.path.dirname(os.path.abspath(sys.argv[0]))
+    if "__compiled__" in globals() or getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
     else:
         return os.path.dirname(os.path.abspath(__file__))
 

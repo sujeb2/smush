@@ -12,8 +12,8 @@ DESIGN_HEIGHT = 1920
 
 
 def find_compiled_dir():
-    if "__compiled__" in globals():
-        return os.path.dirname(os.path.abspath(sys.argv[0]))
+    if "__compiled__" in globals() or getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
     return os.path.dirname(os.path.abspath(__file__))
 
 

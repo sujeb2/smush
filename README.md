@@ -11,3 +11,8 @@
 - 1920x1080 FHD 24inch screen
 - Any step motor that can do 50kg/cm torque
 - 2 mini type conveyor
+
+## cx_Freeze build
+- Install Python 3.11.
+- Run `build.bat` from Command Prompt on the target Windows machine.
+- The distributable application is written to `dist\smush`.

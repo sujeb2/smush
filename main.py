@@ -13,8 +13,8 @@ from serial_arduino import SerialIO
 from test_mode import TestModeUI
 
 def find_compiled_dir():
-    if "__compiled__" in globals():
-        return os.path.dirname(os.path.abspath(sys.argv[0]))
+    if "__compiled__" in globals() or getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
     return os.path.dirname(os.path.abspath(__file__))
 
 base = find_compiled_dir()
@@ -175,7 +175,11 @@ class Main:
     def _startup_sequence(self):
         try:
             update_config = config["UPDATE"]
-            update_enabled = update_config.getboolean("Enabled", fallback=True) and not self.args.skip_update
+            update_enabled = (
+                update_config.getboolean("Enabled", fallback=True)
+                and not self.args.skip_update
+                and not getattr(sys, "frozen", False)
+            )
             if not update_enabled:
                 self.ui.post_update(100, "UPDATE SKIPPED")
                 time.sleep(0.4)
