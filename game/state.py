@@ -1,0 +1,211 @@
+import queue
+import time
+
+from game.rules import JUDGEMENT_WEIGHT
+
+
+class MinigameStateMixin:
+    def _initialize_state(self):
+        now = time.monotonic()
+        self._initialize_timing_state(now)
+        self._initialize_render_state()
+        self._initialize_gameplay_state()
+        self._initialize_selection_state()
+        self._initialize_result_state()
+        self.event_queue = queue.Queue()
+        self.serial_buffer = ""
+        self.serial_buffer_updated_at = 0.0
+
+    def _initialize_timing_state(self, now):
+        self.scene = "title"
+        self.scene_started = now
+        self.animation_epoch = now
+        self.select_deadline = 0.0
+        self.entry_deadline = 0.0
+        self.entry_choice_deadline = 0.0
+        self.warning_deadline = 0.0
+        self.mode_select_deadline = 0.0
+        self.result_deadline = 0.0
+        self.total_result_deadline = 0.0
+        self.result_unlock_at = 0.0
+        self.next_audio_deadline = 0.0
+        self.next_audio_started = False
+        self.ending_audio_deadline = 0.0
+        self.ending_audio_started = False
+        self.title_audio_deadline = 0.0
+        self.title_audio_started = False
+        self.ci_deadline = 0.0
+        self.loading_phase = None
+        self.loading_target = None
+        self.loading_action = None
+        self.loading_started = 0.0
+        self.fade_started = None
+        self.title_fade_started = None
+        self.entry_title_fade_started = None
+        self.result_fade_started = None
+        self.ending_fade_in_started = None
+        self.transition_phase = None
+        self.transition_started = 0.0
+
+    def _initialize_render_state(self):
+        self.scene_photos = []
+        self.photo_cache = {}
+        self.text_cache = {}
+        self.motion_photo_cache = {}
+        self.fade_photo_cache = {}
+        self.scroll_items = []
+        self.particle_item = None
+        self.particle_base_y = 0
+        self.fade_item = None
+        self.score_item = None
+        self.health_fill_item = None
+        self.judgement_item = None
+        self.result_time_item = None
+        self.select_time_item = None
+        self.entry_time_item = None
+        self.mode_time_item = None
+        self.total_result_time_item = None
+        self.select_time_shown = None
+        self.entry_time_shown = None
+        self.mode_time_shown = None
+        self.result_time_shown = None
+        self.ci_items = {}
+        self.ci_motion_state = {}
+        self.ending_logo_item = None
+        self.ending_thanks_item = None
+        self.ending_accent_item = None
+        self.ending_motion_state = {}
+        self.curtain_items = ()
+
+    def _initialize_gameplay_state(self):
+        self.game_started = None
+        self.game_audio_started = False
+        self.game_audio_job = None
+        self.game_finishing = False
+        self.resolved_notes = set()
+        self.note_items = {}
+        self.judgements = []
+        self.counts = {key: 0 for key in JUDGEMENT_WEIGHT}
+        self.health = 100.0
+        self.display_health = 100.0
+        self.score = 0
+        self.combo = 0
+        self.max_combo = 0
+        self.active_holds = {}
+        self.combo_label_item = None
+        self.combo_item = None
+        self.combo_frame_shown = -1
+        self.combo_photo_cache = {}
+        self.combo_animation_started = None
+        self.health_animation_started = None
+        self.health_animation_from = 100.0
+        self.health_pulse_started = None
+        self.health_change_direction = 0
+        self.health_dynamic_photo = None
+        self.health_visible_state = None
+        self.feedback_until = 0.0
+        self.feedback_started = 0.0
+        self.feedback_frame_shown = -1
+        self.last_feedback = ""
+        self.feedback_visible = False
+        self.judgement_source_frames = {}
+        self.judgement_frames = {}
+        self.catcher_x = 540.0
+        self.catcher_velocity = 0.0
+        self.catcher_last_update = None
+        self.catcher_item = None
+        self.catch_combo_item = None
+        self.catch_score_item = None
+        self.catch_bursts = []
+        self.catch_burst_frames = ()
+        self.catch_burst_source_frames = ()
+
+    def _initialize_selection_state(self):
+        self.song_index = 0
+        self.difficulty_index = 0
+        self.selection_phase = "song"
+        self.track = self.song_groups[0][0]
+        self.select_fade_in_started = None
+        self.select_preview_deadline = 0.0
+        self.select_preview_started = False
+        self.select_preview_started_at = 0.0
+        self.select_preview_key = None
+        self.select_media_item = None
+        self.select_media_photo = None
+        self.select_media_path = None
+        self.select_video = None
+        self.select_video_cv2 = None
+        self.select_video_frame_interval = 1 / 30
+        self.select_video_next_frame = 0.0
+        self.selection_scroll_started = None
+        self.selection_old_offset = 0.0
+        self.selection_new_offset = 0.0
+        self.selection_old_x = 0.0
+        self.selection_new_x = 0.0
+        self.selection_scroll_swapped = False
+        self.selection_heading_item = None
+        self.selection_sweep_item = None
+        self.select_morph_in_started = None
+        self.select_morph_in_offset = 0.0
+        self.down_button_item = None
+        self.down_button_base_y = 1845.0
+        self.next_morph_items = []
+        self.title_morph_logo_item = None
+        self.title_morph_top_logo_item = None
+        self.title_morph_press_item = None
+        self.title_morph_logo_frames = ()
+        self.title_morph_top_logo_frames = ()
+        self.title_morph_press_frames = ()
+        self.title_select_offset = 0.0
+        self.title_entry_morph_started = None
+        self.title_entry_logo_item = None
+        self.title_entry_logo_frames = ()
+        self.title_entry_logo_frame_shown = -1
+        self.entry_card_item = None
+        self.entry_card_frames = ()
+        self.entry_card_frame_shown = -1
+        self.entry_card_source_frames = {}
+        self.entry_cancel_source_frames = ()
+        self.entry_choice = None
+        self.entry_choice_started = 0.0
+        self.warning_item = None
+        self.warning_frames = ()
+        self.warning_frame_shown = -1
+        self.warning_source_frames = ()
+        self.warning_select_source_frames = ()
+        self.warning_mode_source_frames = ()
+        self.mode_icon_item = None
+        self.mode_icon_frames = ()
+        self.mode_icon_frame_shown = -1
+        self.mode_icon_animation_started = None
+        self.mode_morph_in_started = None
+        self.mode_morph_in_offset = 0.0
+        self.mode_description_item = None
+        self.next_arrow_items = []
+        self.next_arrow_frames = ()
+
+    def _initialize_result_state(self):
+        self.result_transition_target = None
+        self.total_result_time_shown = None
+        self.total_result_value_item = None
+        self.total_result_value_shown = None
+        self.total_result_count_started = False
+        self.total_result_count_finished = False
+        self.total_result_count_channel = None
+        self.total_result_card_items = []
+        self.total_result_cards_revealed = 0
+        self.timer_sfx_value = None
+        self.result_card_offset = 0.0
+        self.result_banner_item = None
+        self.result_banner_frames = ()
+        self.result_banner_frame_shown = -1
+        self.result_wave_source_frames = {}
+        self.result_value_items = {}
+        self.result_values_shown = {}
+        self.result_final_counts = {key: 0 for key in JUDGEMENT_WEIGHT}
+        self.result_select_morph_started = None
+        self.result_select_card_offset = 0.0
+        self.result_morph_item = None
+        self.result_morph_frames = ()
+        self.result_morph_frame_shown = -1
+        self.result_morph_source_frames = ()

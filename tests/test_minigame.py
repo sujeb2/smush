@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from types import SimpleNamespace
 
+from game.AssetWorker import IMAGE_PATHS, load_minigame_assets
 from game.minigame import (
     AudioPlayer,
     EVENT_TRACK_COUNT,
@@ -258,6 +259,29 @@ class SelectionTests(unittest.TestCase):
         groups = group_charts_by_song(charts)
         self.assertEqual(len(groups), 2)
         self.assertEqual([chart.difficulty for chart in groups[0]], ["Easy", "Hard"])
+
+
+class RefactorTests(unittest.TestCase):
+    def test_state_initialization_groups_default_runtime_state(self):
+        track = SimpleNamespace(title="Song")
+        game = MinigameUI.__new__(MinigameUI)
+        game.song_groups = ((track,),)
+        game._initialize_state()
+        self.assertEqual(game.scene, "title")
+        self.assertIs(game.track, track)
+        self.assertEqual(game.counts, {"perfect": 0, "good": 0, "bad": 0, "miss": 0})
+        self.assertEqual((game.health, game.combo, game.score), (100.0, 0, 0))
+
+    def test_asset_worker_builds_all_derived_sources(self):
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        sources, bgm_root, sfx_root = load_minigame_assets(base)
+        required = set(IMAGE_PATHS) | {
+            "catch_line", "top_gradient", "next_arrow_left", "select_sweep", "catch_particle", "catch_scroll",
+        }
+        self.assertTrue(required <= set(sources))
+        self.assertEqual(sources["top_gradient"].size, (1080, 520))
+        self.assertEqual(sources["select_sweep"].size, (150, sources["select_bg"].height))
+        self.assertEqual(sfx_root, os.path.join(bgm_root, "sfx"))
 
 
 if __name__ == "__main__":
