@@ -1,7 +1,12 @@
 import os
+import queue
 import tempfile
+import threading
+import time
 import unittest
 from types import SimpleNamespace
+
+from PIL import Image
 
 from game.AssetWorker import IMAGE_PATHS, load_minigame_assets
 from game.minigame import (
@@ -135,6 +140,17 @@ class AudioTests(unittest.TestCase):
         game.audio = SimpleNamespace(position_seconds=lambda: 12.345)
         self.assertEqual(game._game_elapsed(), 12.345)
 
+    def test_sfx_preload_populates_audio_cache_once(self):
+        loaded = []
+        player = AudioPlayer.__new__(AudioPlayer)
+        player.available = True
+        player.sfx_cache = {}
+        player.pygame = SimpleNamespace(mixer=SimpleNamespace(Sound=lambda path: loaded.append(path) or path))
+        player._print = lambda message: None
+        with tempfile.NamedTemporaryFile(suffix=".wav") as audio:
+            player.preload_sfx((audio.name, audio.name))
+        self.assertEqual(loaded, [audio.name])
+
 
 class OsuChartTests(unittest.TestCase):
     def setUp(self):
@@ -267,7 +283,7 @@ class RefactorTests(unittest.TestCase):
         game = MinigameUI.__new__(MinigameUI)
         game.song_groups = ((track,),)
         game._initialize_state()
-        self.assertEqual(game.scene, "title")
+        self.assertEqual(game.scene, "preload")
         self.assertIs(game.track, track)
         self.assertEqual(game.counts, {"perfect": 0, "good": 0, "bad": 0, "miss": 0})
         self.assertEqual((game.health, game.combo, game.score), (100.0, 0, 0))
@@ -282,6 +298,64 @@ class RefactorTests(unittest.TestCase):
         self.assertEqual(sources["top_gradient"].size, (1080, 520))
         self.assertEqual(sources["select_sweep"].size, (150, sources["select_bg"].height))
         self.assertEqual(sfx_root, os.path.join(bgm_root, "sfx"))
+
+    def test_game_media_is_sized_and_dimmed_for_playfield(self):
+        game = MinigameUI.__new__(MinigameUI)
+        source = game._game_media_source(Image.new("RGB", (320, 180), "white"))
+        self.assertEqual(source.size, (1000, 1430))
+        self.assertTrue(130 <= source.getpixel((500, 715))[0] <= 134)
+
+    def test_ci_waits_for_preload_completion(self):
+        actions = []
+        game = MinigameUI.__new__(MinigameUI)
+        game.preload_complete = False
+        game.show_preload = lambda action: actions.append(action)
+        game.show_ci(fade_in=True)
+        self.assertEqual(len(actions), 1)
+
+    def test_preload_diagnostic_advances_checking_stages(self):
+        game = MinigameUI.__new__(MinigameUI)
+        game.preload_status_lines = []
+        game.preload_stage_states = {}
+        game.preload_active_stage = None
+        game.scene = "test"
+        game._print = lambda message: None
+        game._set_preload_stage("GRAPHIC ASSETS", "CHECKING")
+        self.assertEqual(game.preload_stage_states["GRAPHIC ASSETS"], "CHECKING")
+        game._set_preload_stage("GRAPHIC ASSETS", "OK")
+        game._set_preload_stage("ANIMATION CACHE", "CHECKING")
+        self.assertEqual(game.preload_stage_states["GRAPHIC ASSETS"], "OK")
+        self.assertEqual(game.preload_stage_states["ANIMATION CACHE"], "CHECKING")
+        game._update_preload_status("Initialization complete.")
+        self.assertTrue(all(status == "OK" for status in game.preload_stage_states.values()))
+
+    def test_preload_worker_runs_independent_groups_on_multiple_threads(self):
+        game = MinigameUI.__new__(MinigameUI)
+        game.event_queue = queue.Queue()
+        game._load_assets = lambda: None
+        thread_ids = set()
+        lock = threading.Lock()
+
+        def work():
+            with lock:
+                thread_ids.add(threading.get_ident())
+            time.sleep(0.025)
+
+        for name in (
+            "_preload_entry_animation_sources",
+            "_preload_warning_animation_sources",
+            "_preload_result_animation_sources",
+            "_preload_gameplay_animation_sources",
+            "_preload_chart_media",
+            "_warm_preload_audio_files",
+        ):
+            setattr(game, name, work)
+        game._run_preload()
+        events = []
+        while not game.event_queue.empty():
+            events.append(game.event_queue.get_nowait()[0])
+        self.assertGreater(len(thread_ids), 1)
+        self.assertIn("preload_ready", events)
 
 
 if __name__ == "__main__":

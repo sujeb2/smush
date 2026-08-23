@@ -67,6 +67,20 @@ class AudioPlayer:
             self._print(f"[AudioManager] sfx playback failed: {error}")
             return None
 
+    def preload_sfx(self, paths):
+        if not self.available:
+            return
+        loaded = 0
+        for path in paths:
+            if path in self.sfx_cache or not os.path.isfile(path):
+                continue
+            try:
+                self.sfx_cache[path] = self.pygame.mixer.Sound(path)
+                loaded += 1
+            except Exception as error:
+                self._print(f"[AudioManager] sfx preload failed: {error}")
+        self._print(f"[AudioManager] preloaded sfx: {loaded}")
+
     def is_playing(self):
         if not self.available:
             return False

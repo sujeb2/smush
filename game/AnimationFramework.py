@@ -389,6 +389,8 @@ class MinigameAnimationMixin:
             return
         if self.transition_phase is not None:
             self._animate_transition(now)
+        elif self.scene == "preload":
+            self._animate_preload(now)
         elif self.scene == "title":
             self._animate_title(now)
         elif self.scene == "ci":
@@ -413,6 +415,7 @@ class MinigameAnimationMixin:
         elif self.scene == "next":
             self._animate_next(now)
         elif self.scene == "game":
+            self._animate_game_media(now)
             self._update_game_frame(now)
         elif self.scene == "result":
             self._animate_result(now)
@@ -464,6 +467,14 @@ class MinigameAnimationMixin:
                     self._print("serial input ready")
                 elif event[0] == "status":
                     self._print(event[1])
+                elif event[0] == "preload_status":
+                    self._update_preload_status(event[1])
+                elif event[0] == "preload_stage":
+                    self._set_preload_stage(event[1], event[2], announce=event[2] == "CHECKING")
+                elif event[0] == "preload_ready":
+                    self._finish_preload()
+                elif event[0] == "preload_error":
+                    self._fail_preload(event[1])
         except queue.Empty:
             pass
 

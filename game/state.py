@@ -17,7 +17,7 @@ class MinigameStateMixin:
         self.serial_buffer_updated_at = 0.0
 
     def _initialize_timing_state(self, now):
-        self.scene = "title"
+        self.scene = "preload"
         self.scene_started = now
         self.animation_epoch = now
         self.select_deadline = 0.0
@@ -76,6 +76,33 @@ class MinigameStateMixin:
         self.ending_accent_item = None
         self.ending_motion_state = {}
         self.curtain_items = ()
+        self.preload_started = False
+        self.preload_complete = False
+        self.preload_started_at = 0.0
+        self.preload_next_action = None
+        self.preload_status_lines = ["start smush minigame..."]
+        self.preload_error = None
+        self.preload_stage_states = {}
+        self.preload_active_stage = None
+        self.preload_status_items = {}
+        self.preload_status_photos = {}
+        self.preload_elapsed_item = None
+        self.preload_elapsed_photo = None
+        self.preload_footer_item = None
+        self.preload_footer_photo = None
+        self.preload_cursor_item = None
+        self.preload_visual_tick = 0
+        self.preload_next_visual_update = 0.0
+        self.preload_renderer_started = False
+        self.preload_render_tasks = []
+        self.preload_render_index = 0
+        self.preloaded_judgement_frames = {}
+        self.preloaded_catch_burst_frames = ()
+        self.preloaded_gameplay_scale = None
+        self.chart_preview_sources = {}
+        self.chart_game_sources = {}
+        self.chart_video_first_frames = {}
+        self.chart_video_fps = {}
 
     def _initialize_gameplay_state(self):
         self.game_started = None
@@ -119,6 +146,13 @@ class MinigameStateMixin:
         self.catch_bursts = []
         self.catch_burst_frames = ()
         self.catch_burst_source_frames = ()
+        self.game_media_item = None
+        self.game_media_photo = None
+        self.game_media_path = None
+        self.game_video = None
+        self.game_video_cv2 = None
+        self.game_video_frame_interval = 1 / 24
+        self.game_video_next_frame = 0.0
 
     def _initialize_selection_state(self):
         self.song_index = 0

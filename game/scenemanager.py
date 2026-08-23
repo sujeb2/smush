@@ -12,6 +12,8 @@ class MinigameSceneMixin:
             return
         if self.scene not in ("select", "title_select"):
             self._close_select_video()
+        if self.scene != "game":
+            self._close_game_video()
         self._prepare_scene()
         self.scene_photos = []
         self.scroll_items = []
@@ -93,6 +95,10 @@ class MinigameSceneMixin:
         self.ending_thanks_item = None
         self.ending_accent_item = None
         self.ending_motion_state = {}
+        self.game_media_item = None
+        if self.scene == "preload":
+            self._build_preload_scene()
+            return
         self.canvas.create_rectangle(
             self._x(0), self._y(0), self._x(DESIGN_WIDTH), self._y(DESIGN_HEIGHT),
             fill="#bd98e8", outline="",

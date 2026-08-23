@@ -275,6 +275,9 @@ class MinigameFlowMixin:
         self.audio.play(os.path.join(self.bgm_root, "title.mp3"), fade_ms=500)
 
     def show_ci(self, fade_in=False):
+        if not self.preload_complete:
+            self.show_preload(lambda: self.show_ci(fade_in=fade_in))
+            return
         self.scene = "ci"
         self.entry_title_fade_started = None
         self.title_fade_started = None
@@ -512,6 +515,7 @@ class MinigameFlowMixin:
         self.feedback_visible = False
         self.game_finishing = False
         self.note_items = {}
+        self._prepare_game_media(self.track)
         self._build_scene()
         delay = round(pre_roll * 1000)
         self.game_audio_job = self.root.after(delay, self._start_chart_audio)
@@ -524,6 +528,7 @@ class MinigameFlowMixin:
         self.audio.play(self.track.audio_path)
         self.game_started = time.monotonic()
         self.game_audio_started = True
+        self.game_video_next_frame = self.game_started
         self._print(f"chart started: {os.path.basename(self.track.path)}")
 
     def _game_elapsed(self):

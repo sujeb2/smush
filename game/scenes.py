@@ -1,6 +1,6 @@
 import math
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
-from game.rules import JUDGEMENT_WEIGHT, TEXT_SCALE
+from game.rules import TEXT_SCALE
 from ui_framework import DESIGN_HEIGHT, DESIGN_WIDTH
 
 
@@ -14,6 +14,7 @@ class MinigameGameSceneMixin:
             self._x(0), self._y(0), self._x(DESIGN_WIDTH), self._y(DESIGN_HEIGHT),
             fill="#8d73aa", outline="", tags=("game",),
         )
+        self._build_game_media()
         self._image("top_gradient", 0, 0, anchor="nw", tags=("game",))
         self._build_header()
         self._text_image(self.track.difficulty, 26, 95, 250, anchor="w", tags=("game",)) # beatmap diff need to change
@@ -30,13 +31,12 @@ class MinigameGameSceneMixin:
         self._image("health_bg", 835, 655, anchor="nw", tags=("game",))
         self.health_fill_item = self.canvas.create_image(self._x(853), self._y(1554), anchor="s", tags=("game_health",))
         self.judgement_item = self.canvas.create_image(self._x(540), self._y(1715), anchor="center", tags=("game_feedback",))
-        self.judgement_frames = {
-            name: tuple(self._photo(frame) for frame in self._judgement_animation_sources(name))
-            for name in JUDGEMENT_WEIGHT
-        }
+        self._ensure_preloaded_gameplay_photos()
+        self.judgement_frames = self.preloaded_judgement_frames
         self._update_health_image()
 
     def _build_game_information(self):
+        self._build_game_media()
         self._image("top_gradient", 0, 0, anchor="nw", tags=("game",))
         self._build_header()
         self._text_image(self.track.difficulty, 26, 95, 250, anchor="w", tags=("game",)) # beatmap diff need to change
@@ -54,7 +54,8 @@ class MinigameGameSceneMixin:
         self._build_game_information()
         self.canvas.create_rectangle(
             self._x(40), self._y(470), self._x(1040), self._y(1900),
-            fill="#a77dd1", outline="#35bdff", width=max(2, round(5 * self.scale)), tags=("catch_playfield",),
+            fill="" if self.game_media_photo is not None else "#a77dd1",
+            outline="#35bdff", width=max(2, round(5 * self.scale)), tags=("catch_playfield",),
         )
         particle_photo = self._asset_photo("catch_particle")
         self.canvas.create_image(
@@ -67,7 +68,8 @@ class MinigameGameSceneMixin:
             )
         self._image("catch_line", 40, 1850, anchor="nw", tags=("catch_line",))
         self.catcher_item = self._image("catcher", self.catcher_x, 1725, tags=("catch_catcher",))
-        self.catch_burst_frames = tuple(self._photo(frame) for frame in self._catch_burst_sources())
+        self._ensure_preloaded_gameplay_photos()
+        self.catch_burst_frames = self.preloaded_catch_burst_frames
         self.catch_combo_item = self._text_image(
             "", 80, 90, 1725, anchor="w", tags=("catch_hud", "catch_combo"),
         )

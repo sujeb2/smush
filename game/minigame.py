@@ -10,6 +10,7 @@ from game.scenes import MinigameGameSceneMixin
 from game.gamemanager import MinigameGameplayMixin
 from game.mediaplayer import MinigameMediaMixin
 from game.persistence import load_event_results, load_progress, save_progress
+from game.PreloadManager import MinigamePreloadMixin
 from game.rules import (
     BAD_WINDOW,
     CI_CREDITS_SECONDS,
@@ -39,9 +40,9 @@ from game.state import MinigameStateMixin
 from game.osu_chart import discover_osu_supported
 from ui_framework import CanvasUIFramework, find_compiled_dir
 
-
 class MinigameUI(
     MinigameStateMixin,
+    MinigamePreloadMixin,
     MinigameFlowMixin,
     MinigameSceneMixin,
     MinigameGameSceneMixin,
@@ -70,9 +71,8 @@ class MinigameUI(
         self.track_scores, self.track_names = load_event_results(self.progress_path, EVENT_TRACK_COUNT)
         self._initialize_state()
         self.audio = AudioPlayer()
-        self._load_assets()
         self.root.bind("<KeyPress>", self._handle_key)
-        self.root.after(0, self.show_ci)
+        self.root.after(0, self.show_preload)
         self.root.after(16, self._animate)
         self.root.after(25, self._poll_serial)
 
@@ -107,17 +107,12 @@ class MinigameUI(
 
     def close(self):
         self._close_select_video()
+        self._close_game_video()
         self.audio.close()
         super().close()
 
-
-
-
-
-
 def run_demo():
     import argparse
-
     parser = argparse.ArgumentParser()
     parser.add_argument("--windowed", action="store_true")
     parser.add_argument("--progress-file")

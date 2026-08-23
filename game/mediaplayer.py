@@ -1,7 +1,9 @@
 import os
 import time
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageEnhance, ImageOps
+
+from ui_framework import DESIGN_HEIGHT, DESIGN_WIDTH
 
 
 class MinigameMediaMixin:
@@ -103,6 +105,10 @@ class MinigameMediaMixin:
                 self._print(f"beatmap video unavailable: {error}")
         fallback = track.background_path
         if fallback:
+            cached = self.chart_preview_sources.get(fallback)
+            if cached is not None:
+                self._set_select_media_frame(cached, False)
+                return
             try:
                 with Image.open(fallback) as image:
                     self._set_select_media_frame(image.copy(), False)
@@ -146,3 +152,73 @@ class MinigameMediaMixin:
             self._play_track_preview()
         self._animate_select_media(now)
 
+    def _game_media_source(self, image):
+        frame = ImageOps.fit(
+            image.convert("RGB"), (DESIGN_WIDTH - 80, DESIGN_HEIGHT - 490),
+            method=Image.Resampling.BILINEAR, centering=(0.5, 0.5),
+        )
+        return ImageEnhance.Brightness(frame).enhance(0.52).convert("RGBA")
+
+    def _set_game_media_source(self, source):
+        self.game_media_photo = self._scaled_photo(source)
+        if self.game_media_item is not None:
+            self.canvas.itemconfigure(self.game_media_item, image=self.game_media_photo)
+
+    def _close_game_video(self):
+        if self.game_video is not None:
+            try:
+                self.game_video.release()
+            except Exception:
+                pass
+        self.game_video = None
+        self.game_video_cv2 = None
+
+    def _prepare_game_media(self, track):
+        self._close_game_video()
+        self.game_media_path = track.video_path or track.background_path
+        self.game_media_photo = None
+        fallback = self.chart_game_sources.get(track.background_path)
+        first_frame = self.chart_video_first_frames.get(track.video_path)
+        initial_source = fallback if fallback is not None else first_frame
+        if initial_source is not None:
+            self._set_game_media_source(initial_source)
+        if not track.video_path:
+            return
+        try:
+            import cv2
+
+            video = cv2.VideoCapture(track.video_path)
+            if not video.isOpened():
+                video.release()
+                return
+            fps = self.chart_video_fps.get(track.video_path) or video.get(cv2.CAP_PROP_FPS) or 30.0
+            self.game_video = video
+            self.game_video_cv2 = cv2
+            self.game_video_frame_interval = 1.0 / min(18.0, max(1.0, fps))
+            self.game_video_next_frame = 0.0
+        except Exception as error:
+            self._print(f"beatmap video unavailable: {error}")
+
+    def _build_game_media(self):
+        if self.game_media_photo is None:
+            return
+        self.game_media_item = self.canvas.create_image(
+            self._x(40), self._y(470), image=self.game_media_photo, anchor="nw", tags=("game_bga",),
+        )
+
+    def _animate_game_media(self, now):
+        if self.game_video is None or self.game_video_cv2 is None or self.game_media_item is None:
+            return
+        elapsed = self._game_elapsed()
+        video_elapsed = elapsed - self.track.video_start_time / 1000.0
+        if video_elapsed < 0 or now < self.game_video_next_frame:
+            return
+        desired_position = video_elapsed * 1000
+        current_position = self.game_video.get(self.game_video_cv2.CAP_PROP_POS_MSEC)
+        tolerance = max(90.0, self.game_video_frame_interval * 2200)
+        if abs(current_position - desired_position) > tolerance:
+            self.game_video.set(self.game_video_cv2.CAP_PROP_POS_MSEC, desired_position)
+        success, frame = self.game_video.read()
+        if success:
+            self._set_game_media_source(self._game_media_source(Image.fromarray(frame[:, :, ::-1])))
+        self.game_video_next_frame = now + self.game_video_frame_interval
