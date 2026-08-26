@@ -62,13 +62,6 @@ void loop() {
       conveyorRunning = true;
       Serial.write("Forwarded_2");
     }
-
-    switch(read) {
-      case read.contains('blink'):
-        break;
-      case read.contains('both_blink'):
-        break;
-    }
   }
 
   if(conveyorRunning) {
@@ -88,14 +81,14 @@ void loop() {
       pendingSwitch = 0;
     }
     if(!resetSent && millis() - pressStartTime >= requiredPressTime) {
-      sw_both_led_blink(TEST_UP_SW_LED, TEST_DOWN_SW_LED, 3, 1000)
+      sw_both_led_blink(TEST_UP_SW_LED, TEST_DOWN_SW_LED, 3, 1000);
       Serial.write("RESET");
       resetSent = true;
     }
   } else if(buttonPressed) {
     if(!upPressed && !downPressed) {
       if(!resetSent) {
-        sw_both_led_blink(TEST_UP_SW_LED, TEST_DOWN_SW_LED, 4, 100)
+        sw_both_led_blink(TEST_UP_SW_LED, TEST_DOWN_SW_LED, 4, 100);
         Serial.write("test_back");
       }
       buttonPressed = false;
