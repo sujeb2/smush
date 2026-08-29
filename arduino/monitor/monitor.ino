@@ -15,8 +15,11 @@
 
 #define TEST_UP_SW 11
 #define TEST_DOWN_SW 12
-#define TEST_UP_SW_LED 13
-#define TEST_DOWN_SW_LED 14
+#define BTN3_SW 13
+#define BTN4_SW 14
+
+#define TEST_UP_SW_LED 15
+#define TEST_DOWN_SW_LED 16
 
 #include <L298NX2.h>
 

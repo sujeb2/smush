@@ -9,4 +9,5 @@ ultralytics
 imageai
 pyinstaller
 pygame
+moderngl
 cx_Freeze

@@ -10,20 +10,54 @@ from game.rules import (
     EVENT_TRACK_COUNT,
     JUDGEMENT_WEIGHT,
     calculate_catch_score,
+    calculate_accuracy,
     calculate_score,
     event_result_destination,
     group_charts_by_song,
     is_clear,
+    rank_for_accuracy,
 )
 from game.persistence import save_progress
 
 
 class MinigameFlowMixin:
+    def _insert_coin(self):
+        if self.coins_per_credit <= 0:
+            return
+        self.coin_count += 1
+        self._play_sfx("coin.wav")
+        if self.coin_count >= self.coins_per_credit:
+            earned, self.coin_count = divmod(self.coin_count, self.coins_per_credit)
+            self.credit_count += earned
+            self._play_sfx("credit.wav")
+        self._refresh_credit_status()
+        self._print(f"coin accepted: {self._credit_status_text()}")
+
     def _handle_key(self, event):
+        if event.keysym in ("minus", "KP_Subtract", "-"):
+            self._open_debug_test_mode()
+            return
+        if self.scene == "game" and self.game_mode == "4k":
+            lane_keys = {
+                "d": 0, "D": 0, "Left": 0,
+                "f": 1, "F": 1, "Down": 1,
+                "j": 2, "J": 2, "Up": 2,
+                "k": 3, "K": 3, "Right": 3,
+            }
+            lane = lane_keys.get(event.keysym)
+            if lane is not None:
+                self.press_button(lane)
+            return
         if event.keysym in ("Left", "a", "A", "space"):
             self.press_button(0)
         elif event.keysym in ("Right", "d", "D", "Return", "KP_Enter"):
             self.press_button(1)
+
+    def _open_debug_test_mode(self):
+        if not self.running or self.test_mode_callback is None:
+            return
+        self._print("debug key received, opening original test mode UI")
+        self.test_mode_callback()
 
     def press_button(self, lane):
         if (
@@ -96,9 +130,10 @@ class MinigameFlowMixin:
             return
         self._play_sfx("cursor_select.wav")
         previous_index = self.mode_index
-        self.mode_index = (self.mode_index + 1) % 2
-        previous_source = self.sources["mode_2k" if previous_index == 0 else "mode_catch"]
-        source = self.sources["mode_2k" if self.mode_index == 0 else "mode_catch"]
+        mode_names = ("2k", "4k", "catch")
+        self.mode_index = (self.mode_index + 1) % len(mode_names)
+        previous_source = self.sources[f"mode_{mode_names[previous_index]}"]
+        source = self.sources[f"mode_{mode_names[self.mode_index]}"]
         frames = []
         for index in range(24):
             progress = index / 23
@@ -133,12 +168,12 @@ class MinigameFlowMixin:
         self.mode_icon_animation_started = time.monotonic()
         self.canvas.itemconfigure(self.mode_icon_item, image=self.mode_icon_frames[0])
         self._update_mode_description()
-        self._print(f"mode selected: {'2K' if self.mode_index == 0 else 'CATCH'}")
+        self._print(f"mode selected: {mode_names[self.mode_index].upper()}")
 
     def _confirm_mode(self):
         if self.mode_icon_animation_started is not None:
             return
-        mode = "2k" if self.mode_index == 0 else "catch"
+        mode = ("2k", "4k", "catch")[self.mode_index]
         if not self._apply_game_mode(mode):
             self._play_sfx("cursor_select.wav")
             self.mode_select_deadline = time.monotonic() + 5.0
@@ -558,6 +593,10 @@ class MinigameFlowMixin:
         self.track_scores[self.track_index] = self.score
         self.track_names[self.track_index] = self.track.title
         self.result_final_counts = dict(self.counts)
+        self.accuracy = calculate_accuracy(
+            self.judgements, len(self.track.notes), catch_mode=self.game_mode == "catch",
+        )
+        self.rank = rank_for_accuracy(self.accuracy)
         self.result_transition_target = None
         now = time.monotonic()
         self.result_unlock_at = now + 3.0
@@ -568,7 +607,10 @@ class MinigameFlowMixin:
         self.result_unlock_at = self.scene_started + 3.0
         duration = self.settings["result_seconds"] if is_clear(self.health) else 3.0
         self.result_deadline = self.scene_started + duration
-        self._print(f"result loaded, score: {self.score}, health: {self.health:.1f}")
+        self._print(
+            f"result loaded, score: {self.score}, accuracy: {self.accuracy:.2f}%, "
+            f"rank: {self.rank}, health: {self.health:.1f}"
+        )
         result_bgm = "result_clear.mp3" if is_clear(self.health) else "result_fail.mp3"
         self.root.after(180, lambda: self._play_scene_audio("result", result_bgm, fade_ms=350))
         self.root.after(220, lambda: self._play_sfx("card_show.wav") if self.scene == "result" else None)

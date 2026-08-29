@@ -2,7 +2,7 @@ import csv
 import math
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 class OsuChartError(ValueError):
@@ -147,20 +147,23 @@ def _slider_span_duration(note_time_ms, pixel_length, slider_multiplier, timing_
     return max(0.08, beat_length * pixel_length / velocity / 1000.0)
 
 
-def parse_osu_mania_2k(path):
+def parse_osu_mania(path, key_count=None):
     format_version, sections = _read_sections(path)
     general = _key_values(sections.get("General", ()))
     metadata = _key_values(sections.get("Metadata", ()))
     difficulty = _key_values(sections.get("Difficulty", ()))
     try:
         mode = int(general.get("Mode", "0"))
-        key_count = float(difficulty.get("CircleSize", "0"))
+        parsed_key_count = float(difficulty.get("CircleSize", "0"))
     except ValueError as error:
         raise OsuChartError(f"invalid mode or circle size: {path}") from error
     if mode != 3:
         raise UnsupportedOsuChartError(f"not an osu!mania chart: {path}")
-    if key_count != 2.0:
-        raise UnsupportedOsuChartError(f"only 2K charts are supported: {path}")
+    if parsed_key_count not in (2.0, 4.0):
+        raise UnsupportedOsuChartError(f"only 2K and 4K charts are supported: {path}")
+    if key_count is not None and parsed_key_count != float(key_count):
+        raise UnsupportedOsuChartError(f"not a {key_count}K chart: {path}")
+    lane_count = int(parsed_key_count)
     notes = []
     for line in sections.get("HitObjects", ()):
         parts = line.split(",")
@@ -174,7 +177,7 @@ def parse_osu_mania_2k(path):
             raise OsuChartError(f"invalid hit object: {line}") from error
         if not note_type & 1 and not note_type & 128:
             continue
-        lane = max(0, min(1, math.floor(x * 2 / 512)))
+        lane = max(0, min(lane_count - 1, math.floor(x * lane_count / 512)))
         end_time = None
         if note_type & 128 and len(parts) > 5:
             try:
@@ -213,16 +216,41 @@ def parse_osu_mania_2k(path):
         title=metadata.get("TitleUnicode") or metadata.get("Title") or os.path.basename(folder),
         artist=metadata.get("ArtistUnicode") or metadata.get("Artist") or "UNKNOWN ARTIST",
         creator=metadata.get("Creator", "UNKNOWN"),
-        difficulty=metadata.get("Version", "2K"),
+        difficulty=metadata.get("Version", f"{lane_count}K"),
         overall_difficulty=overall_difficulty,
         hp_drain_rate=hp_drain_rate,
         audio_path=audio_path,
         audio_lead_in=max(0, audio_lead_in),
         notes=tuple(notes),
+        circle_size=parsed_key_count,
         preview_time=preview_time,
         background_path=background_path,
         video_path=video_path,
         video_start_time=video_start_time,
+    )
+
+
+def parse_osu_mania_2k(path):
+    return parse_osu_mania(path, 2)
+
+
+def parse_osu_mania_4k(path):
+    return parse_osu_mania(path, 4)
+
+
+def derive_4k_chart(chart):
+    lane_counts = [0, 0]
+    notes = []
+    for note in chart.notes:
+        side = 0 if note.lane <= 0 else 1
+        lane = side * 2 + lane_counts[side] % 2
+        lane_counts[side] += 1
+        notes.append(replace(note, lane=lane))
+    return replace(
+        chart,
+        difficulty=f"{chart.difficulty} 4K",
+        notes=tuple(notes),
+        circle_size=4.0,
     )
 
 
@@ -351,7 +379,7 @@ def discover_osu_mania_2k(charts_root, folder_names=()):
 def discover_osu_supported(charts_root, folder_names=()):
     charts_root = os.path.abspath(charts_root)
     allowed = {name.casefold() for name in folder_names if name}
-    charts = {"2k": [], "catch": []}
+    charts = {"2k": [], "4k": [], "catch": []}
     rejected = []
     if not os.path.isdir(charts_root):
         return {key: () for key in charts}, ()
@@ -374,7 +402,14 @@ def discover_osu_supported(charts_root, folder_names=()):
                 if mode == 2:
                     charts["catch"].append(parse_osu_catch(path))
                 elif mode == 3:
-                    charts["2k"].append(parse_osu_mania_2k(path))
+                    difficulty = _key_values(sections.get("Difficulty", ()))
+                    key_count = float(difficulty.get("CircleSize", "0"))
+                    if key_count == 2.0:
+                        charts["2k"].append(parse_osu_mania_2k(path))
+                    elif key_count == 4.0:
+                        charts["4k"].append(parse_osu_mania_4k(path))
+                    else:
+                        raise UnsupportedOsuChartError(f"only 2K and 4K charts are supported: {path}")
             except OsuChartError as error:
                 rejected.append((path, str(error)))
             except ValueError:
@@ -383,4 +418,6 @@ def discover_osu_supported(charts_root, folder_names=()):
         mode_charts.sort(
             key=lambda chart: (os.path.relpath(chart.folder, charts_root).casefold(), chart.difficulty.casefold())
         )
+    if not charts["4k"] and charts["2k"]:
+        charts["4k"] = [derive_4k_chart(chart) for chart in charts["2k"]]
     return {key: tuple(value) for key, value in charts.items()}, tuple(rejected)

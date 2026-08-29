@@ -22,14 +22,35 @@ class MinigameGameSceneMixin:
         self._text_image(self.track.title.upper(), title_size, 95, 310, anchor="w", tags=("game",))
         self._text_image("SCORE", 26, 990, 250, anchor="e", tags=("game",))
         self.score_item = self._text_image(str(self.score), 58, 990, 312, anchor="e", tags=("game_score",))
-        self._image("main_layer", 290, 470, anchor="nw", tags=("game",))
-        self.note_photos = (self._asset_photo("note_0"), self._asset_photo("note_1"))
+        if self.game_mode == "4k":
+            self.lane_origin_x = 173.0
+            self.lane_width = 183.5
+            self.judgement_line_y = 1850.0
+            self.health_background_y = 1020.0
+            self.health_fill_y = 1819.0
+            self._image("main_layer_4k", self.lane_origin_x, 470, anchor="nw", tags=("game",))
+            self.note_photos = tuple(self._asset_photo(f"note_4k_{lane % 2}") for lane in range(4))
+            line_name = "line_4k"
+        else:
+            self.lane_origin_x = 290.0
+            self.lane_width = 250.0
+            self.judgement_line_y = 1560.0
+            self.health_background_y = 655.0
+            self.health_fill_y = 1554.0
+            self._image("main_layer", self.lane_origin_x, 470, anchor="nw", tags=("game",))
+            self.note_photos = (self._asset_photo("note_0"), self._asset_photo("note_1"))
+            line_name = "line"
         self.combo_item = self.canvas.create_image(self._x(540), self._y(790), anchor="center", tags=("game_combo",))
         if self.combo > 0:
             self.canvas.itemconfigure(self.combo_item, image=self._combo_photo(self.combo, 78))
-        self.judgement_line_item = self._image("line", 290, 1560, anchor="nw", tags=("game_line",))
-        self._image("health_bg", 835, 655, anchor="nw", tags=("game",))
-        self.health_fill_item = self.canvas.create_image(self._x(853), self._y(1554), anchor="s", tags=("game_health",))
+        self.judgement_line_item = self._image(
+            line_name, self.lane_origin_x, self.judgement_line_y, anchor="nw", tags=("game_line",),
+        )
+        self._image("health_bg", 835, self.health_background_y, anchor="nw", tags=("game",))
+        self.health_fill_x = 853.0
+        self.health_fill_item = self.canvas.create_image(
+            self._x(self.health_fill_x), self._y(self.health_fill_y), anchor="s", tags=("game_health",),
+        )
         self.judgement_item = self.canvas.create_image(self._x(540), self._y(1715), anchor="center", tags=("game_feedback",))
         self._ensure_preloaded_gameplay_photos()
         self.judgement_frames = self.preloaded_judgement_frames
@@ -74,6 +95,13 @@ class MinigameGameSceneMixin:
             "", 80, 90, 1725, anchor="w", tags=("catch_hud", "catch_combo"),
         )
         self._text_image("COMBO", 27, 92, 1805, anchor="w", tags=("catch_hud",))
+        self._image("catch_health_bg", 510, 345, anchor="nw", tags=("game_health",))
+        self.health_fill_x = 535.0
+        self.health_fill_y = 405.0
+        self.health_fill_item = self.canvas.create_image(
+            self._x(self.health_fill_x), self._y(self.health_fill_y), anchor="w", tags=("game_health",),
+        )
+        self._update_health_image()
         #self.catch_score_item = self._text_image(
         #    str(self.score), 70, 985, 1745, anchor="e", tags=("catch_hud", "catch_score"),
         #)

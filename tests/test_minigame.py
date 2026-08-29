@@ -4,6 +4,7 @@ import tempfile
 import threading
 import time
 import unittest
+from dataclasses import replace
 from types import SimpleNamespace
 
 from PIL import Image
@@ -30,12 +31,26 @@ from game.osu_chart import (
     UnsupportedOsuChartError,
     discover_osu_mania_2k,
     discover_osu_supported,
+    derive_4k_chart,
     parse_osu_catch,
     parse_osu_mania_2k,
+    parse_osu_mania_4k,
 )
+from game.rules import calculate_accuracy, rank_for_accuracy
+from moderngl_framework import ModernGLCanvas, ModernGLUIFramework
 
 
 class ScoreTests(unittest.TestCase):
+    def test_accuracy_and_rank_lookup(self):
+        self.assertEqual(calculate_accuracy(["perfect", "good", "bad", "miss"], 4), 47.5)
+        self.assertEqual(calculate_accuracy(["catch", "catch", "miss", "miss"], 4, catch_mode=True), 50.0)
+        self.assertEqual(rank_for_accuracy(100), "X")
+        self.assertEqual(rank_for_accuracy(95), "S")
+        self.assertEqual(rank_for_accuracy(90), "A")
+        self.assertEqual(rank_for_accuracy(80), "B")
+        self.assertEqual(rank_for_accuracy(70), "C")
+        self.assertEqual(rank_for_accuracy(69.99), "D")
+
     def test_all_perfect_score_is_exact_maximum(self):
         self.assertEqual(calculate_score(["perfect"] * 226, 226), MAX_SCORE)
 
@@ -196,6 +211,25 @@ class OsuChartTests(unittest.TestCase):
         with self.assertRaises(UnsupportedOsuChartError):
             parse_osu_mania_2k(self._write_chart(circle_size="6"))
 
+    def test_4k_chart_maps_all_four_lanes(self):
+        path = self._write_chart(circle_size="4")
+        chart = parse_osu_mania_4k(path)
+        self.assertEqual(chart.circle_size, 4.0)
+        self.assertEqual([note.lane for note in chart.notes], [0, 3])
+        with self.assertRaises(UnsupportedOsuChartError):
+            parse_osu_mania_2k(path)
+
+    def test_2k_chart_gets_playable_4k_fallback(self):
+        chart = parse_osu_mania_2k(self._write_chart())
+        repeated = tuple(
+            replace(note, time=note.time + repeat * 2.0)
+            for repeat in range(2)
+            for note in chart.notes
+        )
+        converted = derive_4k_chart(replace(chart, notes=repeated))
+        self.assertEqual([note.lane for note in converted.notes], [0, 2, 1, 3])
+        self.assertEqual(converted.circle_size, 4.0)
+
     def test_sample_folder_discovers_only_2k_difficulty(self):
         charts, rejected = discover_osu_mania_2k(os.path.join("game", "charts", "sample-chart"))
         self.assertEqual(len(charts), 1)
@@ -278,6 +312,41 @@ class SelectionTests(unittest.TestCase):
 
 
 class RefactorTests(unittest.TestCase):
+    def test_gameplay_scroll_speed_shortens_note_lead_time(self):
+        game = MinigameUI.__new__(MinigameUI)
+        game.settings = {"scroll_speed": 1.30}
+        self.assertAlmostEqual(game._scroll_lead_time(2.0), 2.0 / 1.30)
+        self.assertAlmostEqual(game._scroll_lead_time(1.65), 1.65 / 1.30)
+
+    def test_moderngl_uses_one_design_space_transform(self):
+        canvas = ModernGLCanvas.__new__(ModernGLCanvas)
+        canvas.width = 540
+        canvas.height = 960
+        canvas._update_layout()
+        self.assertEqual(canvas.layout_scale, 0.5)
+        self.assertEqual((canvas.layout_offset_x, canvas.layout_offset_y), (0.0, 0.0))
+
+        deleted = []
+        framework = ModernGLUIFramework.__new__(ModernGLUIFramework)
+        framework.canvas = SimpleNamespace(delete=deleted.append)
+        framework.resize_job = "pending"
+        framework._prepare_scene()
+        source = Image.new("RGBA", (603, 233))
+        self.assertEqual(framework._x(540), 540)
+        self.assertEqual(framework._y(960), 960)
+        self.assertIs(framework._scaled_photo(source), source)
+        self.assertEqual(deleted, ["all"])
+
+    def test_moderngl_center_anchor_centers_both_axes(self):
+        self.assertEqual(
+            ModernGLCanvas._image_origin(540, 270, 603, 174, "center"),
+            (238.5, 183.0),
+        )
+        self.assertEqual(
+            ModernGLCanvas._image_origin(63, 112, 954, 296, "nw"),
+            (63, 112),
+        )
+
     def test_state_initialization_groups_default_runtime_state(self):
         track = SimpleNamespace(title="Song")
         game = MinigameUI.__new__(MinigameUI)
@@ -292,12 +361,42 @@ class RefactorTests(unittest.TestCase):
         base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         sources, bgm_root, sfx_root = load_minigame_assets(base)
         required = set(IMAGE_PATHS) | {
-            "catch_line", "top_gradient", "next_arrow_left", "select_sweep", "catch_particle", "catch_scroll",
+            "catch_line", "line_4k", "health_4k", "mode_4k", "top_gradient", "next_arrow_left",
+            "select_sweep", "catch_particle", "catch_scroll",
         }
         self.assertTrue(required <= set(sources))
         self.assertEqual(sources["top_gradient"].size, (1080, 520))
         self.assertEqual(sources["select_sweep"].size, (150, sources["select_bg"].height))
+        for name in ("select_bg", "previous"):
+            panel = sources[name]
+            fill = panel.getpixel((panel.width // 2, panel.height // 2))
+            self.assertEqual(panel.getpixel((panel.width // 2, 0)), fill)
+            self.assertEqual(panel.getpixel((panel.width - 1, panel.height // 2)), fill)
         self.assertEqual(sfx_root, os.path.join(bgm_root, "sfx"))
+
+    def test_credit_status_and_four_button_serial_input(self):
+        game = MinigameUI.__new__(MinigameUI)
+        game.coins_per_credit = 0
+        game.coin_count = 0
+        game.credit_count = 0
+        self.assertEqual(game._credit_status_text(), "FREEPLAY")
+        game.coins_per_credit = 3
+        game.coin_count = 2
+        game.credit_count = 4
+        self.assertEqual(game._credit_status_text(), "2/3 CREDIT 4")
+
+        pressed = []
+        coins = []
+        game.settings = {
+            "button_1": "sw1", "button_2": "sw2", "button_3": "sw3", "button_4": "sw4",
+            "coin_message": "coin",
+        }
+        game.press_button = pressed.append
+        game._insert_coin = lambda: coins.append(True)
+        game.serial_buffer = "sw1sw2sw3sw4coin"
+        game._drain_serial_buffer(force=True)
+        self.assertEqual(pressed, [0, 1, 2, 3])
+        self.assertEqual(coins, [True])
 
     def test_game_media_is_sized_and_dimmed_for_playfield(self):
         game = MinigameUI.__new__(MinigameUI)

@@ -291,14 +291,14 @@ class MinigameAnimationMixin:
         )
         self.canvas.coords(self.ending_logo_item, self._x(540), self._y(logo_y))
         self.canvas.coords(self.ending_thanks_item, self._x(540), self._y(thanks_y))
-        accent_progress = smooth_progress((elapsed - 0.7) / 0.9)
-        accent_half_width = 285 * accent_progress
-        accent_pulse = 0.82 + 0.18 * math.sin(max(0.0, elapsed - 1.6) * 1.7) ** 2
-        self.canvas.coords(
-            self.ending_accent_item,
-            self._x(540 - accent_half_width * accent_pulse), self._y(1082 + float_offset * 0.3),
-            self._x(540 + accent_half_width * accent_pulse), self._y(1090 + float_offset * 0.3),
-        )
+        #accent_progress = smooth_progress((elapsed - 0.7) / 0.9)
+        #accent_half_width = 285 * accent_progress
+        #accent_pulse = 0.82 + 0.18 * math.sin(max(0.0, elapsed - 1.6) * 1.7) ** 2
+        #self.canvas.coords(
+        #    self.ending_accent_item,
+        #    self._x(540 - accent_half_width * accent_pulse), self._y(1082 + float_offset * 0.3),
+        #    self._x(540 + accent_half_width * accent_pulse), self._y(1090 + float_offset * 0.3),
+        #)
         audio_finished = self.ending_audio_started and self.audio.available and not self.audio.is_playing()
         fallback_finished = now >= self.ending_audio_deadline
         if self.loading_phase is None and (audio_finished or fallback_finished):
@@ -442,20 +442,36 @@ class MinigameAnimationMixin:
         self._drain_serial_buffer()
 
     def _drain_serial_buffer(self, force=False):
-        commands = (self.settings["button_1"], self.settings["button_2"])
+        entries = tuple(
+            (command, action) for command, action in (
+                (self.settings["button_1"], 0), (self.settings["button_2"], 1),
+                (self.settings["button_3"], 2), (self.settings["button_4"], 3),
+                (self.settings["coin_message"], "coin"),
+            )
+            if command
+        )
+        commands = tuple(command for command, _ in entries)
+        if not entries:
+            self.serial_buffer = ""
+            return
         while self.serial_buffer:
-            matches = [(self.serial_buffer.find(command), index, command) for index, command in enumerate(commands)]
+            matches = [
+                (self.serial_buffer.find(command), action, command) for command, action in entries
+            ]
             matches = [match for match in matches if match[0] >= 0]
             if not matches:
                 self.serial_buffer = self.serial_buffer[-max(len(command) for command in commands):]
                 return
-            position, lane, command = min(matches, key=lambda match: (match[0], -len(match[2])))
+            position, action, command = min(matches, key=lambda match: (match[0], -len(match[2])))
             end = position + len(command)
             longer_possible = any(candidate.startswith(command) and len(candidate) > len(command) for candidate in commands)
             if not force and end == len(self.serial_buffer) and longer_possible:
                 return
             self.serial_buffer = self.serial_buffer[end:]
-            self.press_button(lane)
+            if action == "coin":
+                self._insert_coin()
+            else:
+                self.press_button(action)
         self.serial_buffer = self.serial_buffer[-256:]
 
     def _poll_events(self):

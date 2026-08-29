@@ -1,6 +1,6 @@
 import time
 
-from PIL import Image, ImageTk
+from PIL import Image
 
 from game.rules import is_clear
 from ui_framework import DESIGN_HEIGHT, DESIGN_WIDTH
@@ -37,8 +37,13 @@ class MinigameResultSceneMixin:
             item = self._text_image("0", 29, 470, y, anchor="e", tags=("result_card",))
             self.result_value_items[label.lower()] = item
             self.result_values_shown[label.lower()] = 0
-        self._text_image("HEALTH", 23, 695, 1390 + offset, anchor="w", tags=("result_card",))
-        self._text_image(f"{self.health:.0f}%", 38, 940, 1388 + offset, anchor="e", tags=("result_card",))
+        accuracy = f"{self.accuracy:.2f}".rstrip("0").rstrip(".")
+        self._text_image(
+            f"ACCURACY: {accuracy}%", 23, 116, 1540 + offset, anchor="w", tags=("result_card",),
+        )
+        self._image(
+            f"rank_{self.rank.lower()}", 800, 1375 + offset, tags=("result_card", "result_rank"),
+        )
         self._text_image("SCORE", 25, 940, 1498 + offset, anchor="e", tags=("result_card",))
         self.result_value_items["score"] = self._text_image("0", 63, 940, 1560 + offset, anchor="e", tags=("result_card",))
         self.result_values_shown["score"] = 0
@@ -107,7 +112,7 @@ class MinigameResultSceneMixin:
             width = max(1, round(DESIGN_WIDTH * self.scale))
             height = max(1, round(DESIGN_HEIGHT * self.scale))
             alpha = round(255 * level / 32)
-            self.fade_photo_cache[key] = ImageTk.PhotoImage(Image.new("RGBA", (width, height), (0, 0, 0, alpha)))
+            self.fade_photo_cache[key] = Image.new("RGBA", (width, height), (0, 0, 0, alpha))
         return self.fade_photo_cache[key]
 
     def _create_fade_overlay(self, opacity=0.0):

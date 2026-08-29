@@ -59,6 +59,9 @@ class MinigameStateMixin:
         self.fade_item = None
         self.score_item = None
         self.health_fill_item = None
+        self.health_fill_x = 853.0
+        self.health_fill_y = 1554.0
+        self.judgement_line_y = 1560.0
         self.judgement_item = None
         self.result_time_item = None
         self.select_time_item = None
@@ -237,6 +240,8 @@ class MinigameStateMixin:
         self.result_value_items = {}
         self.result_values_shown = {}
         self.result_final_counts = {key: 0 for key in JUDGEMENT_WEIGHT}
+        self.accuracy = 0.0
+        self.rank = "D"
         self.result_select_morph_started = None
         self.result_select_card_offset = 0.0
         self.result_morph_item = None

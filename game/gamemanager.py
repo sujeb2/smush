@@ -17,6 +17,9 @@ from game.rules import (
 
 
 class MinigameGameplayMixin:
+    def _scroll_lead_time(self, base_seconds):
+        return base_seconds / self.settings.get("scroll_speed", 1.30)
+
     def _move_catcher(self, lane):
         now = time.monotonic()
         self._animate_catcher(now)
@@ -269,16 +272,31 @@ class MinigameGameplayMixin:
             return
         value = self.health if value is None else value
         state = round(value, 1), round(width_scale, 2)
-        self.canvas.coords(self.health_fill_item, self._x(853 + shake), self._y(1554))
+        self.canvas.coords(
+            self.health_fill_item,
+            self._x(self.health_fill_x + shake),
+            self._y(self.health_fill_y),
+        )
         if state == self.health_visible_state:
             return
         self.health_visible_state = state
-        source = self.sources["health"]
+        source_name = (
+            "catch_health"
+            if self.game_mode == "catch"
+            else "health_4k"
+            if self.game_mode == "4k"
+            else "health"
+        )
+        source = self.sources[source_name]
         if value <= 0:
             self.canvas.itemconfigure(self.health_fill_item, image="")
             return
-        visible_height = max(1, round(source.height * value / 100.0))
-        crop = source.crop((0, source.height - visible_height, source.width, source.height))
+        if self.game_mode == "catch":
+            visible_width = max(1, round(source.width * value / 100.0))
+            crop = source.crop((0, 0, visible_width, source.height))
+        else:
+            visible_height = max(1, round(source.height * value / 100.0))
+            crop = source.crop((0, source.height - visible_height, source.width, source.height))
         width = max(1, round(crop.width * width_scale))
         if width != crop.width:
             crop = crop.resize((width, crop.height), Image.Resampling.LANCZOS)
@@ -317,7 +335,7 @@ class MinigameGameplayMixin:
             return
         elapsed = self._game_elapsed()
         self._animate_catcher(now)
-        lead_time = 1.65
+        lead_time = self._scroll_lead_time(1.65)
         start_y = 520.0
         catch_y = 1625.0
         catcher_half_width = max(88.0, 132.0 - (self.track.circle_size - 5.0) * 10.0)
@@ -342,8 +360,10 @@ class MinigameGameplayMixin:
         self.canvas.tag_raise("catch_burst")
         self.canvas.tag_raise("catch_catcher")
         self.canvas.tag_raise("catch_hud")
+        self.canvas.tag_raise("game_health")
         self._animate_catch_combo(now)
         self._animate_catch_bursts(now)
+        self._animate_health(now)
         if not self.game_finishing and (self.health <= 0 or elapsed >= self.track.duration + 1.2):
             self.game_finishing = True
             self.audio.stop(180)
@@ -360,9 +380,9 @@ class MinigameGameplayMixin:
         for index, note in enumerate(self.track.notes):
             if index not in self.resolved_notes and elapsed > note.time + BAD_WINDOW:
                 self._resolve_note(index, "miss")
-        lead_time = 2.0
+        lead_time = self._scroll_lead_time(2.0)
         start_y = 505
-        hit_y = 1560
+        hit_y = self.judgement_line_y
         visible_notes = set()
         for index, note in enumerate(self.track.notes):
             active_hold = index in self.active_holds
@@ -374,14 +394,15 @@ class MinigameGameplayMixin:
                 visible_notes.add(index)
                 y = hit_y if active_hold else min(hit_y, hit_y - time_until / lead_time * (hit_y - start_y))
                 tail_y = min(hit_y, hit_y - tail_until / lead_time * (hit_y - start_y))
-                x = 290 + note.lane * 250
+                x = self.lane_origin_x + note.lane * self.lane_width
                 if index not in self.note_items:
                     body = None
                     tail = None
                     if note.end_time is not None and note.end_time > note.time:
                         body = self.canvas.create_rectangle(
-                            self._x(x + 28), self._y(tail_y + 22), self._x(x + 222), self._y(y + 22),
-                            fill="#145fda" if note.lane == 0 else "#d7d7dc", outline="", tags=("game_note",),
+                            self._x(x + self.lane_width * 0.112), self._y(tail_y + 22),
+                            self._x(x + self.lane_width * 0.888), self._y(y + 22),
+                            fill="#145fda" if note.lane % 2 == 0 else "#d7d7dc", outline="", tags=("game_note",),
                         )
                         tail = self.canvas.create_image(
                             self._x(x), self._y(tail_y), image=self.note_photos[note.lane], anchor="nw", tags=("game_note",),
@@ -395,7 +416,8 @@ class MinigameGameplayMixin:
                     self.canvas.coords(items["head"], self._x(x), self._y(y))
                     if items["body"] is not None:
                         self.canvas.coords(
-                            items["body"], self._x(x + 28), self._y(tail_y + 22), self._x(x + 222), self._y(y + 22),
+                            items["body"], self._x(x + self.lane_width * 0.112), self._y(tail_y + 22),
+                            self._x(x + self.lane_width * 0.888), self._y(y + 22),
                         )
                         self.canvas.coords(items["tail"], self._x(x), self._y(tail_y))
         for index in tuple(self.note_items):

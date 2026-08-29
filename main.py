@@ -36,10 +36,10 @@ class Main:
         self.args = args
         print(f"[{self.timestamp}] [main] smush starting, config loaded: {config.sections()}")
         print(f"[{self.timestamp}] [main] model path: {config['GENERIC']['ModelPath']}")
-        if self._minigame_enabled():
-            self._run_minigame()
-        elif self._test_mode_enabled():
+        if self._test_mode_enabled():
             self._run_test_mode()
+        elif self._minigame_enabled():
+            self._run_minigame()
         elif self._ui_enabled():
             self._run_ui()
         else:
@@ -62,6 +62,7 @@ class Main:
             os.path.join(base, "files", "main_conf.ini"),
             fullscreen=fullscreen,
             progress_path=os.path.join(base, progress_file),
+            test_mode_callback=self._enter_test_mode,
         )
         self.ui.root.after(100, self._start_minigame_serial)
         print(f"[{self.timestamp}] [main] minigame visible")

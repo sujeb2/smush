@@ -33,6 +33,29 @@ def calculate_catch_score(catches, note_count):
         return 0
     return min(MAX_SCORE, max(0, round(MAX_SCORE * catches / note_count)))
 
+def calculate_accuracy(judgements, note_count, catch_mode=False):
+    if note_count <= 0:
+        return 0.0
+    if catch_mode:
+        value = sum(1.0 for judgement in judgements if judgement == "catch")
+    else:
+        value = sum(JUDGEMENT_WEIGHT.get(judgement, 0.0) for judgement in judgements)
+    return min(100.0, max(0.0, value * 100.0 / note_count))
+
+def rank_for_accuracy(accuracy):
+    accuracy = min(100.0, max(0.0, float(accuracy)))
+    if accuracy >= 100.0:
+        return "X"
+    if accuracy >= 95.0:
+        return "S"
+    if accuracy >= 90.0:
+        return "A"
+    if accuracy >= 80.0:
+        return "B"
+    if accuracy >= 70.0:
+        return "C"
+    return "D"
+
 def is_clear(health):
     return health > 0 and health >= 5.0
 

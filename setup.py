@@ -17,7 +17,7 @@ build_exe_options = {
         ("game/imgs", "game/imgs"),
         ("requirements.txt", "requirements.txt"),
     ],
-    "includes": ["cv2", "model", "pygame"],
+    "includes": ["cv2", "model", "pygame", "moderngl", "glcontext"],
     "include_msvcr": True,
 }
 

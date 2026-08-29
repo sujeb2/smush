@@ -96,6 +96,7 @@ class MinigameSceneMixin:
         self.ending_accent_item = None
         self.ending_motion_state = {}
         self.game_media_item = None
+        self.credit_item = None
         if self.scene == "preload":
             self._build_preload_scene()
             return
@@ -210,6 +211,18 @@ class MinigameSceneMixin:
             f"{self.settings['mode']} MODE [{self._track_position()}/{EVENT_TRACK_COUNT}]",
             22, 1018, 74, anchor="ne", tags=("header",),
         )
+        self.credit_item = self._text_image(
+            self._credit_status_text(), 20, 63, 34, anchor="nw", tags=("header", "credit_status"),
+        )
+
+    def _credit_status_text(self):
+        if self.coins_per_credit == 0:
+            return "FREEPLAY"
+        return f"{self.coin_count}/{self.coins_per_credit} CREDIT {self.credit_count}"
+
+    def _refresh_credit_status(self):
+        if self.credit_item is not None:
+            self.canvas.itemconfigure(self.credit_item, image=self._text(self._credit_status_text(), 20))
 
     def _build_title(self):
         self._image("logo", 540, 270, tags=("title",))
@@ -351,6 +364,8 @@ class MinigameSceneMixin:
         text = (
             "두 개의 버튼을 이용하여서 노트를 처리하는 모드"
             if self.mode_index == 0
+            else "네 개의 버튼과 레인을 이용하여서 노트를 처리하는 모드"
+            if self.mode_index == 1
             else "떨어지는 물건을 받아 처리하는 모드"
         )
         photo = self._text_photo(
@@ -371,7 +386,7 @@ class MinigameSceneMixin:
         self.mode_time_item = self._text_image(str(remaining), 52, 970, 780, tags=("mode_select",))
         self.mode_time_shown = remaining
         self._image("mode_bg", 0, 1015, anchor="nw", tags=("mode_select",))
-        icon_name = "mode_2k" if self.mode_index == 0 else "mode_catch"
+        icon_name = f"mode_{('2k', '4k', 'catch')[self.mode_index]}"
         self.mode_icon_item = self._image(icon_name, 540, 1160, tags=("mode_select", "mode_icon"))
         self._text_image("MODE DESCRIPTION", 29, 540, 1425, tags=("mode_select",))
         self.mode_description_item = self.canvas.create_image(
@@ -460,7 +475,7 @@ class MinigameSceneMixin:
         if has_media:
             self.canvas.create_rectangle(
                 self._x(82), self._y(1152), self._x(268), self._y(1278),
-                fill="#5b416f", outline="#f7eaff", width=max(1, round(3 * self.scale)), tags=tags,
+                fill="#5b416f", outline="", tags=tags,
             )
             self.select_media_item = self.canvas.create_image(
                 self._x(90), self._y(1175), image=self.select_media_photo, anchor="nw", tags=tags,

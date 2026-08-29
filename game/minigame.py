@@ -38,7 +38,8 @@ from game.result_scene import MinigameResultSceneMixin
 from game.scenemanager import MinigameSceneMixin
 from game.state import MinigameStateMixin
 from game.osu_chart import discover_osu_supported
-from ui_framework import CanvasUIFramework, find_compiled_dir
+from ui_framework import find_compiled_dir
+from moderngl_framework import ModernGLUIFramework
 
 class MinigameUI(
     MinigameStateMixin,
@@ -50,9 +51,9 @@ class MinigameUI(
     MinigameGameplayMixin,
     MinigameMediaMixin,
     MinigameAnimationMixin,
-    CanvasUIFramework,
+    ModernGLUIFramework,
 ):
-    def __init__(self, config_path, fullscreen=True, progress_path=None):
+    def __init__(self, config_path, fullscreen=True, progress_path=None, test_mode_callback=None):
         self.settings = self._load_settings(config_path)
         super().__init__("SMUSH MINIGAME", fullscreen=fullscreen)
         charts_root = os.path.join(self.base, self.settings["charts_root"])
@@ -61,14 +62,21 @@ class MinigameUI(
             self._print(f"[ChartManager] chart skipped: {os.path.basename(path)} ({reason})")
         if not any(self.charts_by_mode.values()):
             self.root.destroy()
-            raise RuntimeError(f"[ChartManager] No valid 2K or catch chart was found in {charts_root}")
-        self.game_mode = "2k" if self.charts_by_mode["2k"] else "catch"
-        self.mode_index = 0 if self.game_mode == "2k" else 1
+            raise RuntimeError(f"[ChartManager] No valid 2K, 4K, or catch chart was found in {charts_root}")
+        self.game_mode = next(mode for mode in ("2k", "4k", "catch") if self.charts_by_mode[mode])
+        self.mode_index = ("2k", "4k", "catch").index(self.game_mode)
         self.charts = self.charts_by_mode[self.game_mode]
         self.song_groups = group_charts_by_song(self.charts)
         self.progress_path = progress_path or os.path.join(self.base, self.settings["progress_file"])
         self.track_index = load_progress(self.progress_path, EVENT_TRACK_COUNT)
         self.track_scores, self.track_names = load_event_results(self.progress_path, EVENT_TRACK_COUNT)
+        self.test_mode_callback = test_mode_callback
+        self.coins_per_credit = self.settings["coins_per_credit"]
+        self.coin_count = max(0, self.settings["initial_coin_count"])
+        self.credit_count = max(0, self.settings["initial_credit_count"])
+        if self.coins_per_credit > 0:
+            earned, self.coin_count = divmod(self.coin_count, self.coins_per_credit)
+            self.credit_count += earned
         self._initialize_state()
         self.audio = AudioPlayer()
         self.root.bind("<KeyPress>", self._handle_key)
@@ -88,8 +96,15 @@ class MinigameUI(
             "event_chart_folders": folders,
             "button_1": section.get("Button1Message", "Forwarded").lower(),
             "button_2": section.get("Button2Message", "Forwarded_2").lower(),
+            "button_3": section.get("Button3Message", "Forwarded_3").lower(),
+            "button_4": section.get("Button4Message", "Forwarded_4").lower(),
+            "coin_message": section.get("CoinMessage", "coin").lower(),
+            "coins_per_credit": max(0, int(section.get("CoinsPerCredit", 0))),
+            "initial_coin_count": max(0, int(section.get("InitialCoinCount", 0))),
+            "initial_credit_count": max(0, int(section.get("InitialCreditCount", 0))),
             "select_seconds": max(1, int(section.get("SelectSeconds", 60))),
             "result_seconds": max(1, int(section.get("ResultSeconds", 20))),
+            "scroll_speed": min(3.0, max(0.5, float(section.get("ScrollSpeed", 1.30)))),
         }
 
     def _load_assets(self):
