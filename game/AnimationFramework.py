@@ -165,7 +165,11 @@ class MinigameAnimationMixin:
             self.canvas.coords(self.next_arrow_items[1], self._x(715 + travel), self._y(900))
             self.canvas.itemconfigure(self.next_arrow_items[0], image=self.next_arrow_frames[0][frame])
             self.canvas.itemconfigure(self.next_arrow_items[1], image=self.next_arrow_frames[1][frame])
-        audio_finished = self.next_audio_started and self.audio.available and not self.audio.is_playing()
+        audio_finished = (
+            self.next_audio_started
+            and self.next_audio_channel is not None
+            and not self.next_audio_channel.get_busy()
+        )
         if now >= self.next_audio_deadline or audio_finished:
             self._begin_game_transition()
 
@@ -193,6 +197,19 @@ class MinigameAnimationMixin:
         c3 = c1 + 1
         shifted = progress - 1
         eased = 1 + c3 * shifted * shifted * shifted + c1 * shifted * shifted
+        rank_progress = min(1.0, max(0.0, (elapsed - 0.62) / 0.72))
+        if rank_progress > 0 and not self.result_rank_voice_played:
+            self.result_rank_voice_played = True
+            self.result_rank_sfx_channel = self._play_sfx("rank_show.mp3", volume=0.68)
+            self.result_rank_voice_channel = self._play_rank_voice()
+        if self.result_rank_item is not None:
+            rank_frame = min(
+                len(self.result_rank_frames) - 1,
+                round(rank_progress * (len(self.result_rank_frames) - 1)),
+            )
+            if rank_frame != self.result_rank_frame_shown:
+                self.canvas.itemconfigure(self.result_rank_item, image=self.result_rank_frames[rank_frame])
+                self.result_rank_frame_shown = rank_frame
         new_offset = 560 * (1 - eased)
         delta = new_offset - self.result_card_offset
         if abs(delta) > 0.001:
@@ -277,6 +294,9 @@ class MinigameAnimationMixin:
         elapsed = now - self.scene_started
         logo_progress = smooth_progress((elapsed - 0.18) / 0.92)
         thanks_progress = smooth_progress((elapsed - 0.82) / 0.78)
+        if elapsed >= 0.82 and not self.ending_voice_played:
+            self.ending_voice_played = True
+            self.ending_voice_channel = self._play_ending_voice()
         logo_scale = 0.78 + 0.22 * logo_progress + 0.025 * math.sin(logo_progress * math.pi)
         thanks_scale = 0.94 + 0.06 * thanks_progress
         float_offset = math.sin(max(0.0, elapsed - 1.7) * 1.45) * 3.5 * logo_progress

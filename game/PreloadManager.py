@@ -192,6 +192,8 @@ class MinigamePreloadMixin:
         self._result_morph_sources()
         for name in ("clear", "failed"):
             self._result_wave_sources(name)
+        for rank in ("x", "s", "a", "b", "c", "d"):
+            self._rank_reveal_sources(f"rank_{rank}")
 
     def _preload_gameplay_animation_sources(self):
         self._catch_burst_sources()
@@ -240,7 +242,7 @@ class MinigamePreloadMixin:
             for path in (chart.audio_path, chart.video_path, chart.background_path)
             if path
         }
-        bundled_files = set(glob.glob(os.path.join(self.bgm_root, "*")))
+        bundled_files = set(glob.glob(os.path.join(self.bgm_root, "**", "*"), recursive=True))
         bundled_files.update(glob.glob(os.path.join(self.sfx_root, "*")))
         for path in chart_files | bundled_files:
             if not os.path.isfile(path):
@@ -253,7 +255,11 @@ class MinigamePreloadMixin:
 
     def _warm_preload_audio_files(self):
         self._warm_preload_files()
-        self.audio.preload_sfx(glob.glob(os.path.join(self.sfx_root, "*.wav")))
+        preload_paths = glob.glob(os.path.join(self.sfx_root, "*.wav"))
+        preload_paths.extend(glob.glob(os.path.join(self.sfx_root, "*.mp3")))
+        preload_paths.extend(glob.glob(os.path.join(self.voice_root, "*.mp3")))
+        preload_paths.append(os.path.join(self.bgm_root, "next.mp3"))
+        self.audio.preload_sfx(preload_paths)
 
     def _refresh_preload_stage(self, name):
         if self.scene != "preload" or name not in self.preload_status_items:

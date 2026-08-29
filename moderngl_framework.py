@@ -60,6 +60,52 @@ def _rgba(value):
     return tuple(channel / 255.0 for channel in rgb)
 
 
+class FrameRateCounter:
+    def __init__(self, refresh_seconds=0.5):
+        self.refresh_seconds = refresh_seconds
+        self.last_frame_at = None
+        self.window_started_at = None
+        self.total_started_at = None
+        self.window_frames = 0
+        self.total_frames = 0
+        self.current = 0.0
+        self.minimum = None
+        self.maximum = 0.0
+        self.average = 0.0
+
+    def update(self, now=None):
+        now = time.perf_counter() if now is None else now
+        if self.last_frame_at is None:
+            self.last_frame_at = now
+            self.window_started_at = now
+            self.total_started_at = now
+            return False
+        if now <= self.last_frame_at:
+            return False
+        self.last_frame_at = now
+        self.window_frames += 1
+        self.total_frames += 1
+        total_elapsed = now - self.total_started_at
+        self.average = self.total_frames / total_elapsed
+        window_elapsed = now - self.window_started_at
+        if window_elapsed < self.refresh_seconds:
+            return False
+        self.current = self.window_frames / window_elapsed
+        self.minimum = self.current if self.minimum is None else min(self.minimum, self.current)
+        self.maximum = max(self.maximum, self.current)
+        self.window_frames = 0
+        self.window_started_at = now
+        return True
+
+    def text(self):
+        if self.minimum is None:
+            return "FPS --.-   MIN --.-   MAX --.-   AVG --.-"
+        return (
+            f"FPS {self.current:.1f}   MIN {self.minimum:.1f}   "
+            f"MAX {self.maximum:.1f}   AVG {self.average:.1f}"
+        )
+
+
 @dataclass
 class _CanvasItem:
     kind: str
@@ -89,6 +135,7 @@ class ModernGLCanvas:
         self.next_item = 1
         self.textures = {}
         self.render_count = 0
+        self.fps_overlay = None
         self.program = context.program(vertex_shader=_VERTEX_SHADER, fragment_shader=_FRAGMENT_SHADER)
         vertices = array("f", (
             0, 0, 0, 0,  1, 0, 1, 0,  1, 1, 1, 1,
@@ -257,6 +304,18 @@ class ModernGLCanvas:
             self._draw_quad(left, top + line, line, max(0, height - 2 * line), self.white_image, color)
             self._draw_quad(right - line, top + line, line, max(0, height - 2 * line), self.white_image, color)
 
+    def update_fps_overlay(self, text, font_path):
+        font = ImageFont.truetype(font_path, 16)
+        probe = ImageDraw.Draw(Image.new("RGBA", (1, 1), (0, 0, 0, 0)))
+        box = probe.textbbox((0, 0), text, font=font)
+        width = box[2] - box[0] + 20
+        height = box[3] - box[1] + 12
+        image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        draw.rounded_rectangle((0, 0, width - 1, height - 1), radius=7, fill=(28, 20, 42, 178))
+        draw.text((10 - box[0], 6 - box[1]), text, font=font, fill="white")
+        self.fps_overlay = image
+
     def render(self):
         self.render_count += 1
         self.context.viewport = (0, 0, self.width, self.height)
@@ -265,6 +324,11 @@ class ModernGLCanvas:
             item = self.items.get(item_id)
             if item is not None:
                 self._render_item(item)
+        if self.fps_overlay is not None:
+            self._draw_quad(
+                63, 70, self.fps_overlay.width, self.fps_overlay.height,
+                self.fps_overlay, (1, 1, 1, 1),
+            )
         if self.render_count % 120 == 0:
             for key, (source_ref, texture, last_used) in tuple(self.textures.items()):
                 if source_ref() is None and self.render_count - last_used >= 120:
@@ -351,6 +415,7 @@ class PygameRoot:
 
     def mainloop(self):
         clock = self.pygame.time.Clock()
+        fps_counter = self.framework.fps_counter
         try:
             while self.framework.running:
                 for event in self.pygame.event.get():
@@ -371,6 +436,10 @@ class PygameRoot:
                     break
                 self.framework.canvas.render()
                 self.pygame.display.flip()
+                if fps_counter.update():
+                    self.framework.canvas.update_fps_overlay(
+                        fps_counter.text(), self.framework.novecento_demibold_font_path,
+                    )
                 clock.tick(60)
         finally:
             self.framework._shutdown_display()
@@ -394,6 +463,7 @@ class ModernGLUIFramework:
         self.serial = None
         self.pygame = pygame
         self.moderngl = moderngl
+        self.fps_counter = FrameRateCounter()
         if os.name == "nt":
             try:
                 import ctypes
@@ -439,6 +509,7 @@ class ModernGLUIFramework:
             ("*A2Z*", "*에이투지체-4Regular.ttf", "*에이투지체-4Regular.ttf"),
             font_directories,
         )
+        self.canvas.update_fps_overlay(self.fps_counter.text(), self.novecento_demibold_font_path)
         self._prepare_scene()
 
     def run(self):

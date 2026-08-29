@@ -447,6 +447,7 @@ class MinigameFlowMixin:
     def show_next(self):
         self.scene = "next"
         self.next_audio_started = False
+        self.next_audio_channel = None
         self._build_scene()
         self.scene_started = time.monotonic()
         self.next_audio_deadline = self.scene_started + 5.1
@@ -459,15 +460,41 @@ class MinigameFlowMixin:
             return
         self.next_audio_started = True
         self.next_audio_deadline = time.monotonic() + 4.7
-        self.audio.play(os.path.join(self.bgm_root, "next.mp3"), fade_ms=220)
+        if self.audio.current_path == self.track.audio_path and self.audio.is_playing():
+            self.audio.set_music_volume(0.58)
+        else:
+            self.audio.play(
+                self.track.audio_path, fade_ms=220,
+                start_seconds=self._preview_start_seconds(self.track), volume=0.58,
+            )
+        self.next_audio_channel = self.audio.play_sfx(
+            os.path.join(self.bgm_root, "next.mp3"), volume=0.34,
+        )
 
     def _play_scene_audio(self, scene, filename, loop=False, fade_ms=0):
         if self.running and self.scene == scene and not (scene == "result" and self.result_fade_started is not None):
             self.audio.play(os.path.join(self.bgm_root, filename), loop=loop, fade_ms=fade_ms)
 
 
-    def _play_sfx(self, filename):
-        return self.audio.play_sfx(os.path.join(self.sfx_root, filename))
+    def _play_sfx(self, filename, volume=1.0):
+        return self.audio.play_sfx(os.path.join(self.sfx_root, filename), volume=volume)
+
+    def _play_rank_voice(self):
+        return self.audio.play_sfx(
+            os.path.join(self.voice_root, f"rank_{self.rank.lower()}.mp3"), volume=0.9,
+        )
+
+    def _play_ending_voice(self):
+        return self.audio.play_sfx(
+            os.path.join(self.voice_root, "see_you.mp3"), volume=0.9,
+        )
+
+    def _stop_result_rank_audio(self):
+        for attribute in ("result_rank_sfx_channel", "result_rank_voice_channel"):
+            channel = getattr(self, attribute)
+            if channel is not None:
+                channel.stop()
+                setattr(self, attribute, None)
 
     def _update_timer(self, item, remaining, shown_attribute, size=52):
         shown = getattr(self, shown_attribute)
@@ -518,6 +545,9 @@ class MinigameFlowMixin:
         self._print("music selected transition started")
 
     def _start_game_scene(self):
+        if self.next_audio_channel is not None:
+            self.next_audio_channel.stop()
+            self.next_audio_channel = None
         self.audio.stop()
         self.scene = "game"
         self.scene_started = time.monotonic()
@@ -597,6 +627,9 @@ class MinigameFlowMixin:
             self.judgements, len(self.track.notes), catch_mode=self.game_mode == "catch",
         )
         self.rank = rank_for_accuracy(self.accuracy)
+        self.result_rank_voice_played = False
+        self.result_rank_sfx_channel = None
+        self.result_rank_voice_channel = None
         self.result_transition_target = None
         now = time.monotonic()
         self.result_unlock_at = now + 3.0
@@ -611,7 +644,7 @@ class MinigameFlowMixin:
             f"result loaded, score: {self.score}, accuracy: {self.accuracy:.2f}%, "
             f"rank: {self.rank}, health: {self.health:.1f}"
         )
-        result_bgm = "result_clear.mp3" if is_clear(self.health) else "result_fail.mp3"
+        result_bgm = "result.mp3"
         self.root.after(180, lambda: self._play_scene_audio("result", result_bgm, fade_ms=350))
         self.root.after(220, lambda: self._play_sfx("card_show.wav") if self.scene == "result" else None)
 
@@ -622,6 +655,7 @@ class MinigameFlowMixin:
             or time.monotonic() < self.result_unlock_at
         ):
             return
+        self._stop_result_rank_audio()
         self.result_transition_target, next_track = event_result_destination(self.track_index, is_clear(self.health))
         self.track_index = next_track
         try:
@@ -682,6 +716,8 @@ class MinigameFlowMixin:
         self.scene = "ending"
         self.ending_audio_deadline = time.monotonic() + 9.8
         self.ending_audio_started = False
+        self.ending_voice_played = False
+        self.ending_voice_channel = None
         self.fade_started = None
         self.result_fade_started = None
         self.ending_fade_in_started = None

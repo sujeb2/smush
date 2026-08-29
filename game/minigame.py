@@ -109,6 +109,7 @@ class MinigameUI(
 
     def _load_assets(self):
         self.sources, self.bgm_root, self.sfx_root = load_minigame_assets(self.base)
+        self.voice_root = os.path.join(self.bgm_root, "voice")
 
     def _print(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S")

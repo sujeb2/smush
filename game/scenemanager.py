@@ -82,6 +82,9 @@ class MinigameSceneMixin:
         self.health_visible_state = None
         self.result_banner_frames = ()
         self.result_banner_frame_shown = -1
+        self.result_rank_item = None
+        self.result_rank_frames = ()
+        self.result_rank_frame_shown = -1
         self.result_morph_item = None
         self.result_morph_frames = ()
         self.result_morph_frame_shown = -1
@@ -444,7 +447,7 @@ class MinigameSceneMixin:
         self._build_selection_list(("select", "select_list", "select_dynamic"))
 
     def _build_selection_shell(self, tags):
-        self._image("select_bg", 18, 1125, anchor="nw", tags=tags)
+        self._image("select_bg", 32, 1110, anchor="nw", tags=tags)
         self.down_button_item = self._image("down_button", 540, self.down_button_base_y, tags=tags)
 
     def _build_selection_list(self, tags):

@@ -37,7 +37,7 @@ from game.osu_chart import (
     parse_osu_mania_4k,
 )
 from game.rules import calculate_accuracy, rank_for_accuracy
-from moderngl_framework import ModernGLCanvas, ModernGLUIFramework
+from moderngl_framework import FrameRateCounter, ModernGLCanvas, ModernGLUIFramework
 
 
 class ScoreTests(unittest.TestCase):
@@ -130,12 +130,33 @@ class ScoreTests(unittest.TestCase):
         self.assertTrue(positions)
 
 
+class FrameRateCounterTests(unittest.TestCase):
+    def test_tracks_window_extremes_and_time_weighted_average(self):
+        counter = FrameRateCounter(refresh_seconds=0.5)
+        self.assertFalse(counter.update(0.0))
+        for frame in range(1, 31):
+            refreshed = counter.update(frame / 60)
+        self.assertTrue(refreshed)
+        self.assertAlmostEqual(counter.current, 60.0)
+        self.assertAlmostEqual(counter.minimum, 60.0)
+        self.assertAlmostEqual(counter.maximum, 60.0)
+        for frame in range(1, 16):
+            refreshed = counter.update(0.5 + frame / 30)
+        self.assertTrue(refreshed)
+        self.assertAlmostEqual(counter.current, 30.0)
+        self.assertAlmostEqual(counter.minimum, 30.0)
+        self.assertAlmostEqual(counter.maximum, 60.0)
+        self.assertAlmostEqual(counter.average, 45.0)
+        self.assertEqual(counter.text(), "FPS 30.0   MIN 30.0   MAX 60.0   AVG 45.0")
+
+
 class AudioTests(unittest.TestCase):
     def test_song_preview_starts_from_chart_preview_time(self):
         calls = []
         music = SimpleNamespace(
             load=lambda path: calls.append(("load", path)),
             play=lambda *args: calls.append(("play", args)),
+            set_volume=lambda volume: calls.append(("volume", volume)),
             stop=lambda: None,
             fadeout=lambda milliseconds: None,
         )
@@ -147,6 +168,87 @@ class AudioTests(unittest.TestCase):
         with tempfile.NamedTemporaryFile() as audio:
             player.play(audio.name, fade_ms=260, start_seconds=40.16)
         self.assertEqual(calls[-1], ("play", (0, 40.16, 260)))
+
+    def test_next_screen_mixes_preview_and_next_audio(self):
+        calls = []
+        channel = SimpleNamespace()
+        track = SimpleNamespace(audio_path="song.mp3", preview_time=40160)
+        game = MinigameUI.__new__(MinigameUI)
+        game.running = True
+        game.scene = "next"
+        game.transition_phase = None
+        game.track = track
+        game.bgm_root = "/bgm"
+        game.audio = SimpleNamespace(
+            current_path=track.audio_path,
+            is_playing=lambda: True,
+            set_music_volume=lambda volume: calls.append(("music", volume)),
+            play_sfx=lambda path, volume=1.0: calls.append((path, volume)) or channel,
+        )
+        game._play_next_audio()
+        self.assertEqual(calls, [("music", 0.58), (os.path.join("/bgm", "next.mp3"), 0.34)])
+        self.assertIs(game.next_audio_channel, channel)
+
+    def test_rank_voice_uses_result_rank_audio(self):
+        calls = []
+        game = MinigameUI.__new__(MinigameUI)
+        game.rank = "S"
+        game.voice_root = "/voice"
+        game.audio = SimpleNamespace(play_sfx=lambda path, volume=1.0: calls.append((path, volume)))
+        game._play_rank_voice()
+        self.assertEqual(calls, [(os.path.join("/voice", "rank_s.mp3"), 0.9)])
+
+    def test_ending_voice_uses_see_you_audio(self):
+        calls = []
+        game = MinigameUI.__new__(MinigameUI)
+        game.voice_root = "/voice"
+        game.audio = SimpleNamespace(play_sfx=lambda path, volume=1.0: calls.append((path, volume)))
+        game._play_ending_voice()
+        self.assertEqual(calls, [(os.path.join("/voice", "see_you.mp3"), 0.9)])
+
+    def test_result_animation_plays_rank_voice_once(self):
+        calls = []
+        game = MinigameUI.__new__(MinigameUI)
+        game.scene_started = 0.0
+        game.result_rank_voice_played = False
+        game._play_sfx = lambda filename, volume=1.0: calls.append((filename, volume))
+        game._play_rank_voice = lambda: calls.append(("rank", 0.9))
+        game.result_rank_sfx_channel = None
+        game.result_rank_voice_channel = None
+        game.result_rank_item = None
+        game.result_card_offset = 560.0
+        game.result_banner_item = None
+        game.result_final_counts = {}
+        game.score = 0
+        game.result_values_shown = {"score": 0}
+        game.result_value_items = {}
+        game.scale = 1.0
+        game.canvas = SimpleNamespace(move=lambda *args: None)
+        game._animate_result(0.8)
+        game._animate_result(1.0)
+        self.assertEqual(calls, [("rank_show.mp3", 0.68), ("rank", 0.9)])
+
+    def test_ending_animation_plays_see_you_voice_once(self):
+        calls = []
+        game = MinigameUI.__new__(MinigameUI)
+        game.scene_started = 0.0
+        game.ending_voice_played = False
+        game.ending_voice_channel = None
+        game._play_ending_voice = lambda: calls.append("see_you")
+        game._set_motion_item = lambda *args: None
+        game.ending_logo_item = None
+        game.ending_thanks_item = None
+        game.ending_motion_state = {}
+        game.scale = 1.0
+        game.offset_x = 0.0
+        game.offset_y = 0.0
+        game.canvas = SimpleNamespace(coords=lambda *args: None)
+        game.ending_audio_started = False
+        game.ending_audio_deadline = 20.0
+        game.loading_phase = "active"
+        game._animate_ending(0.9)
+        game._animate_ending(1.1)
+        self.assertEqual(calls, ["see_you"])
 
     def test_gameplay_uses_actual_mixer_position(self):
         game = MinigameUI.__new__(MinigameUI)
@@ -361,12 +463,22 @@ class RefactorTests(unittest.TestCase):
         base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         sources, bgm_root, sfx_root = load_minigame_assets(base)
         required = set(IMAGE_PATHS) | {
-            "catch_line", "line_4k", "health_4k", "mode_4k", "top_gradient", "next_arrow_left",
+            "catch_line", "line_4k", "health_4k", "health_bg_4k", "mode_4k", "top_gradient", "next_arrow_left",
             "select_sweep", "catch_particle", "catch_scroll",
         }
         self.assertTrue(required <= set(sources))
         self.assertEqual(sources["top_gradient"].size, (1080, 520))
         self.assertEqual(sources["select_sweep"].size, (150, sources["select_bg"].height))
+        self.assertEqual(sources["health_4k"].size, sources["health_bg_4k"].size)
+        self.assertTrue(all(sources[f"rank_{rank}"].width <= 190 for rank in "xsabcd"))
+        self.assertTrue(all(sources[f"rank_{rank}"].height <= 220 for rank in "xsabcd"))
+        game = MinigameUI.__new__(MinigameUI)
+        game.sources = sources
+        game.rank_reveal_source_frames = {}
+        rank_frames = game._rank_reveal_sources("rank_s")
+        self.assertEqual(len(rank_frames), 28)
+        self.assertIsNone(rank_frames[0].getbbox())
+        self.assertIsNotNone(rank_frames[-1].getbbox())
         for name in ("select_bg", "previous"):
             panel = sources[name]
             fill = panel.getpixel((panel.width // 2, panel.height // 2))

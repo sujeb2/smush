@@ -26,8 +26,11 @@ class MinigameGameSceneMixin:
             self.lane_origin_x = 173.0
             self.lane_width = 183.5
             self.judgement_line_y = 1850.0
-            self.health_background_y = 1020.0
+            self.health_background_x = 952.0
+            self.health_background_y = 1085.0
+            self.health_fill_x = 970.0
             self.health_fill_y = 1819.0
+            health_background_name = "health_bg_4k"
             self._image("main_layer_4k", self.lane_origin_x, 470, anchor="nw", tags=("game",))
             self.note_photos = tuple(self._asset_photo(f"note_4k_{lane % 2}") for lane in range(4))
             line_name = "line_4k"
@@ -35,8 +38,11 @@ class MinigameGameSceneMixin:
             self.lane_origin_x = 290.0
             self.lane_width = 250.0
             self.judgement_line_y = 1560.0
+            self.health_background_x = 835.0
             self.health_background_y = 655.0
+            self.health_fill_x = 853.0
             self.health_fill_y = 1554.0
+            health_background_name = "health_bg"
             self._image("main_layer", self.lane_origin_x, 470, anchor="nw", tags=("game",))
             self.note_photos = (self._asset_photo("note_0"), self._asset_photo("note_1"))
             line_name = "line"
@@ -46,8 +52,10 @@ class MinigameGameSceneMixin:
         self.judgement_line_item = self._image(
             line_name, self.lane_origin_x, self.judgement_line_y, anchor="nw", tags=("game_line",),
         )
-        self._image("health_bg", 835, self.health_background_y, anchor="nw", tags=("game",))
-        self.health_fill_x = 853.0
+        self._image(
+            health_background_name, self.health_background_x, self.health_background_y,
+            anchor="nw", tags=("game",),
+        )
         self.health_fill_item = self.canvas.create_image(
             self._x(self.health_fill_x), self._y(self.health_fill_y), anchor="s", tags=("game_health",),
         )
@@ -95,8 +103,8 @@ class MinigameGameSceneMixin:
             "", 80, 90, 1725, anchor="w", tags=("catch_hud", "catch_combo"),
         )
         self._text_image("COMBO", 27, 92, 1805, anchor="w", tags=("catch_hud",))
-        self._image("catch_health_bg", 510, 345, anchor="nw", tags=("game_health",))
-        self.health_fill_x = 535.0
+        self._image("catch_health_bg", 269, 355, anchor="nw", tags=("game_health",))
+        self.health_fill_x = 294.0
         self.health_fill_y = 405.0
         self.health_fill_item = self.canvas.create_image(
             self._x(self.health_fill_x), self._y(self.health_fill_y), anchor="w", tags=("game_health",),
@@ -139,6 +147,62 @@ class MinigameGameSceneMixin:
             frames.append(frame)
         self.result_wave_source_frames[name] = tuple(frames)
         return self.result_wave_source_frames[name]
+
+    def _rank_reveal_sources(self, name):
+        if name in self.rank_reveal_source_frames:
+            return self.rank_reveal_source_frames[name]
+        source = self.sources[name]
+        width = round(source.width * 1.2) + 48
+        height = round(source.height * 1.2) + 48
+        frames = []
+        for index in range(28):
+            progress = index / 27
+            if progress < 0.38:
+                part = progress / 0.38
+                eased = 1 - pow(1 - part, 3)
+                scale = 0.3 + 0.86 * eased
+                angle = -7 + 9 * eased
+            elif progress < 0.64:
+                part = (progress - 0.38) / 0.26
+                eased = part * part * (3 - 2 * part)
+                scale = 1.16 - 0.22 * eased
+                angle = 2 - 3 * eased
+            else:
+                part = (progress - 0.64) / 0.36
+                eased = part * part * (3 - 2 * part)
+                scale = 0.94 + 0.06 * eased
+                angle = -1 + eased
+            opacity = min(1.0, progress / 0.12)
+            rank = source.resize(
+                (max(1, round(source.width * scale)), max(1, round(source.height * scale))),
+                Image.Resampling.LANCZOS,
+            ).rotate(angle, resample=Image.Resampling.BICUBIC, expand=True)
+            rank_alpha = rank.getchannel("A").point(lambda value, factor=opacity: round(value * factor))
+            rank.putalpha(rank_alpha)
+            frame = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            pulse = min(1.0, progress / 0.78)
+            ring_alpha = round(92 * math.sin(pulse * math.pi))
+            ring_width = round(70 + (width - 22) * pulse)
+            ring_height = round(84 + (height - 24) * pulse)
+            draw = ImageDraw.Draw(frame)
+            draw.ellipse(
+                (
+                    (width - ring_width) // 2, (height - ring_height) // 2,
+                    (width + ring_width) // 2, (height + ring_height) // 2,
+                ),
+                outline=(139, 240, 255, ring_alpha), width=3,
+            )
+            glow_alpha = rank.getchannel("A").filter(ImageFilter.GaussianBlur(11)).point(
+                lambda value, factor=0.42 + 0.28 * math.sin(progress * math.pi): round(value * factor)
+            )
+            glow = Image.new("RGBA", rank.size, (137, 235, 255, 0))
+            glow.putalpha(glow_alpha)
+            position = ((width - rank.width) // 2, (height - rank.height) // 2)
+            frame.alpha_composite(glow, position)
+            frame.alpha_composite(rank, position)
+            frames.append(frame)
+        self.rank_reveal_source_frames[name] = tuple(frames)
+        return self.rank_reveal_source_frames[name]
 
     def _result_morph_sources(self):
         if self.result_morph_source_frames:

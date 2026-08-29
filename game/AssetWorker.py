@@ -112,8 +112,9 @@ def load_minigame_assets(base):
     sources["catch_line"] = sources["line"].resize((1000, 33), Image.Resampling.LANCZOS)
     sources["line_4k"] = sources["line"].resize((734, 33), Image.Resampling.LANCZOS)
     sources["health_4k"] = sources["health"].resize((sources["health"].width, 734), Image.Resampling.LANCZOS)
+    sources["health_bg_4k"] = sources["health_bg"].resize((sources["health_bg"].width, 734), Image.Resampling.LANCZOS)
     for rank in ("x", "s", "a", "b", "c", "d"):
-        sources[f"rank_{rank}"].thumbnail((230, 270), Image.Resampling.LANCZOS)
+        sources[f"rank_{rank}"].thumbnail((190, 220), Image.Resampling.LANCZOS)
     gradient = Image.new("RGBA", (1, 2))
     gradient.putpixel((0, 0), (115, 82, 166, 255))
     gradient.putpixel((0, 1), (198, 158, 244, 255))

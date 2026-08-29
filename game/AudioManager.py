@@ -24,7 +24,7 @@ class AudioPlayer:
         timestamp = datetime.now().strftime("%H:%M:%S")
         print(f"[{timestamp}] [minigame] {message}")
 
-    def play(self, path, loop=False, fade_ms=0, start_seconds=0.0):
+    def play(self, path, loop=False, fade_ms=0, start_seconds=0.0, volume=1.0):
         self.stop()
         if not self.available or not os.path.isfile(path):
             if not os.path.isfile(path):
@@ -32,6 +32,7 @@ class AudioPlayer:
             return
         try:
             self.pygame.mixer.music.load(path)
+            self.pygame.mixer.music.set_volume(min(1.0, max(0.0, float(volume))))
             self.pygame.mixer.music.play(
                 -1 if loop else 0, max(0.0, float(start_seconds)), max(0, fade_ms),
             )
@@ -52,7 +53,7 @@ class AudioPlayer:
             pass
         self.current_path = None
 
-    def play_sfx(self, path):
+    def play_sfx(self, path, volume=1.0):
         if not self.available or not os.path.isfile(path):
             if not os.path.isfile(path):
                 self._print(f"sfx file missing: {path}")
@@ -61,11 +62,21 @@ class AudioPlayer:
             if path not in self.sfx_cache:
                 self.sfx_cache[path] = self.pygame.mixer.Sound(path)
             channel = self.sfx_cache[path].play()
+            if channel is not None:
+                channel.set_volume(min(1.0, max(0.0, float(volume))))
             self._print(f"[AudioManager] playing sfx: {os.path.basename(path)}")
             return channel
         except Exception as error:
             self._print(f"[AudioManager] sfx playback failed: {error}")
             return None
+
+    def set_music_volume(self, volume):
+        if not self.available:
+            return
+        try:
+            self.pygame.mixer.music.set_volume(min(1.0, max(0.0, float(volume))))
+        except Exception:
+            pass
 
     def preload_sfx(self, paths):
         if not self.available:

@@ -41,8 +41,13 @@ class MinigameResultSceneMixin:
         self._text_image(
             f"ACCURACY: {accuracy}%", 23, 116, 1540 + offset, anchor="w", tags=("result_card",),
         )
-        self._image(
-            f"rank_{self.rank.lower()}", 800, 1375 + offset, tags=("result_card", "result_rank"),
+        self.result_rank_frames = tuple(
+            self._photo(frame) for frame in self._rank_reveal_sources(f"rank_{self.rank.lower()}")
+        )
+        self.result_rank_frame_shown = 0
+        self.result_rank_item = self.canvas.create_image(
+            self._x(820), self._y(1350 + offset), image=self.result_rank_frames[0],
+            anchor="center", tags=("result_card", "result_rank"),
         )
         self._text_image("SCORE", 25, 940, 1498 + offset, anchor="e", tags=("result_card",))
         self.result_value_items["score"] = self._text_image("0", 63, 940, 1560 + offset, anchor="e", tags=("result_card",))
