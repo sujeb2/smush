@@ -97,14 +97,46 @@ class ScoreTests(unittest.TestCase):
         game.score_item = None
         game.note_items = {}
         bursts = []
+        hitsounds = []
+        game._play_sfx = lambda filename, volume=1.0: hitsounds.append((filename, volume))
         game._start_catch_burst = lambda x, y: bursts.append((x, y))
         game.track = SimpleNamespace(notes=tuple(ChartNote(float(index), 0) for index in range(6)))
         for index in range(5):
             game._resolve_catch(index, True)
         self.assertEqual((game.combo, game.score, game.counts["catch"]), (5, 7500, 5))
         self.assertEqual(len(bursts), 1)
+        self.assertEqual(hitsounds, [("hitsound.wav", 0.78)] * 5)
         game._resolve_catch(5, False)
         self.assertEqual((game.combo, game.health, game.counts["miss"]), (0, 93.0, 1))
+        self.assertEqual(hitsounds, [("hitsound.wav", 0.78)] * 5)
+
+    def test_note_hits_and_hold_ticks_play_hitsound_but_misses_do_not(self):
+        hitsounds = []
+        game = MinigameUI.__new__(MinigameUI)
+        game.resolved_notes = set()
+        game.judgements = []
+        game.counts = {"perfect": 0, "good": 0, "bad": 0, "miss": 0}
+        game.health = 100.0
+        game.combo = 0
+        game.max_combo = 0
+        game.combo_animation_started = None
+        game.combo_frame_shown = -1
+        game.combo_photo_cache = {}
+        game.game_mode = "2k"
+        game.combo_item = None
+        game.catch_combo_item = None
+        game.score_item = None
+        game.judgement_item = None
+        game.feedback_visible = False
+        game.active_holds = {}
+        game.track = SimpleNamespace(notes=(ChartNote(0.0, 0, 1.0), ChartNote(1.0, 0)))
+        game._game_elapsed = lambda: 0.0
+        game._start_health_animation = lambda previous, current: None
+        game._play_sfx = lambda filename, volume=1.0: hitsounds.append((filename, volume))
+        game._resolve_note(0, "perfect")
+        game._update_hold_ticks(0.25)
+        game._resolve_note(1, "miss")
+        self.assertEqual(hitsounds, [("hitsound.wav", 0.78), ("hitsound.wav", 0.62)])
 
     def test_catcher_uses_momentum_instead_of_fixed_steps(self):
         positions = []

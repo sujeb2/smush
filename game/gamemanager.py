@@ -101,6 +101,7 @@ class MinigameGameplayMixin:
         self.counts[judgement] += 1
         previous_health = self.health
         if caught:
+            self._play_sfx("hitsound.wav", volume=0.78)
             self.health = min(100.0, self.health + 0.55)
             self._advance_combo()
             if self.counts["catch"] % 5 == 0:
@@ -151,6 +152,7 @@ class MinigameGameplayMixin:
         if judgement == "miss":
             self._break_combo()
         else:
+            self._play_sfx("hitsound.wav", volume=0.78)
             self._advance_combo()
             note = self.track.notes[index]
             ticks = tuple(tick for tick in hold_tick_times(note.time, note.end_time) if tick > self._game_elapsed())
@@ -308,6 +310,7 @@ class MinigameGameplayMixin:
             ticks = state["ticks"]
             while state["next"] < len(ticks) and elapsed >= ticks[state["next"]]:
                 state["next"] += 1
+                self._play_sfx("hitsound.wav", volume=0.62)
                 previous_health = self.health
                 self.health = min(100.0, self.health + 0.08)
                 self._advance_combo()
@@ -436,4 +439,3 @@ class MinigameGameplayMixin:
             self.game_finishing = True
             self.audio.stop(180)
             self._start_loading("result", self.show_result)
-
