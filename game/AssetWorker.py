@@ -27,6 +27,7 @@ IMAGE_PATHS = {
     "next_arrow": ("music_select", "next_arrow.png"),
     "mode_bg": ("mode_select", "mode_bg.png"),
     "mode_2k": ("mode_select", "mode_2k.png"),
+    "mode_4k": ("mode_select", "mode_4k.png"),
     "mode_catch": ("mode_select", "mode_catch.png"),
     "mode_button": ("mode_select", "down_bt.png"),
     "main_layer": ("game", "main_layer.png"),
@@ -65,7 +66,6 @@ IMAGE_PATHS = {
 
 
 def _remove_edge_outline(source, border_width=12):
-    """Rebuild a left-rounded panel edge without its baked outer stroke."""
     image = source.copy().convert("RGBA")
     alpha = image.getchannel("A")
     top_pixels = [x for x in range(image.width) if alpha.getpixel((x, 0))]
@@ -92,6 +92,16 @@ def _remove_edge_outline(source, border_width=12):
     return cleaned
 
 
+def _fit_mode_icon(source):
+    visible_alpha = source.getchannel("A").point(lambda value: 255 if value > 4 else 0)
+    bounds = visible_alpha.getbbox()
+    image = source.crop(bounds) if bounds is not None else source.copy()
+    image.thumbnail((560, 230), Image.Resampling.LANCZOS)
+    frame = Image.new("RGBA", (600, 250), (0, 0, 0, 0))
+    frame.alpha_composite(image, ((frame.width - image.width) // 2, (frame.height - image.height) // 2))
+    return frame
+
+
 def load_minigame_assets(base):
     image_root = os.path.join(base, "game", "imgs")
     sources = {
@@ -100,19 +110,19 @@ def load_minigame_assets(base):
     }
     sources["select_bg"] = _remove_edge_outline(sources["select_bg"])
     sources["previous"] = _remove_edge_outline(sources["previous"])
-    sources["mode_catch"].thumbnail((360, 250), Image.Resampling.LANCZOS)
-    mode_4k = Image.new("RGBA", (360, 250), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(mode_4k)
-    for lane in range(4):
-        left = 42 + lane * 68
-        draw.rounded_rectangle((left, 28, left + 58, 205), radius=10, fill=(51, 38, 73, 235), outline=(198, 158, 244, 255), width=4)
-    font_path = os.path.join(base, "files", "fonts", "Novecentosanswide-DemiBold.otf")
-    try:
-        font = ImageFont.truetype(font_path, 48)
-    except OSError:
-        font = ImageFont.load_default()
-    draw.text((180, 120), "4K", font=font, fill=(136, 245, 255, 255), anchor="mm")
-    sources["mode_4k"] = mode_4k
+    for name in ("mode_2k", "mode_4k", "mode_catch"):
+        sources[name] = _fit_mode_icon(sources[name])
+    #mode_4k = Image.new("RGBA", (360, 250), (0, 0, 0, 0))
+    #draw = ImageDraw.Draw(mode_4k)
+    #for lane in range(4):
+    #    left = 42 + lane * 68
+    #    draw.rounded_rectangle((left, 28, left + 58, 205), radius=10, fill=(51, 38, 73, 235), outline=(198, 158, 244, 255), width=4)
+    #font_path = os.path.join(base, "files", "fonts", "Novecentosanswide-DemiBold.otf")
+    #try:
+    #    font = ImageFont.truetype(font_path, 48)
+    #except OSError:
+    #    font = ImageFont.load_default()
+    #draw.text((180, 120), "4K", font=font, fill=(136, 245, 255, 255), anchor="mm")
     sources["catcher"].thumbnail((280, 176), Image.Resampling.LANCZOS)
     sources["catch_object"].thumbnail((96, 96), Image.Resampling.LANCZOS)
     sources["catch_line"] = sources["line"].resize((1000, 33), Image.Resampling.LANCZOS)

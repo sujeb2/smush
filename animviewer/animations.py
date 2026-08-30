@@ -58,7 +58,7 @@ CATALOG = (
     AnimationSpec("MINIGAME", "Ending Logo Reveal", 2.40, 60, "ending", _keys(2.40, (0, "EMPTY"), (.32, "ACCENT"), (.64, "LOGO"), (1, "THANKS"))),
     AnimationSpec("MINIGAME", "Catcher Momentum", .70, 60, "catcher", _keys(.70, (0, "INPUT"), (.25, "ACCELERATE"), (1, "FRICTION"))),
     AnimationSpec("MINIGAME", "Catch Burst", .42, 60, "burst", _keys(.42, (0, "CATCH"), (.32, "EXPLODE"), (1, "FADE"))),
-    AnimationSpec("MINIGAME", "Catch Combo Bounce", .28, 60, "combo", _keys(.28, (0, "REST"), (.5, "POP"), (1, "SETTLE")), "X125"),
+    AnimationSpec("MINIGAME", "Catch Combo Bounce", .28, 60, "combo", _keys(.28, (0, "REST"), (.5, "POP"), (1, "SETTLE")), "x125"),
     AnimationSpec("MINIGAME", "2K Combo Bounce", .24, 60, "combo", _keys(.24, (0, "REST"), (.34, "POP"), (1, "SETTLE")), "125 COMBO"),
     AnimationSpec("MINIGAME", "Health Gain", .28, 60, "health", _keys(.28, (0, "OLD"), (.55, "PULSE"), (1, "NEW")), "gain"),
     AnimationSpec("MINIGAME", "Health Loss", .28, 60, "health", _keys(.28, (0, "OLD"), (.55, "PULSE"), (1, "NEW")), "loss"),
@@ -241,8 +241,8 @@ class PreviewRenderer:
     def _draw_icon(self, surface, area, progress, spec):
         self._asset_center(surface, "mode_bg", area.center, (area.width - 80, 260), 155)
         eased = _smooth(progress)
-        old = self.assets.fitted("mode_2k", (360, 250))
-        new = self.assets.fitted("mode_catch", (360, 250))
+        old = self.assets.fitted("mode_2k", (560, 250))
+        new = self.assets.fitted("mode_4k", (560, 250))
         old_scale = 1 - .18 * eased
         old = pygame.transform.smoothscale(old, (round(old.get_width() * old_scale), round(old.get_height() * old_scale)))
         old.set_alpha(round(255 * max(0.0, 1 - progress / .62)))

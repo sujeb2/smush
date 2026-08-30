@@ -164,7 +164,7 @@ class MinigameFlowMixin:
                 lambda value, factor=old_opacity: round(value * factor)
             )
             old_frame.putalpha(old_alpha)
-            frame = Image.new("RGBA", (440, 300), (0, 0, 0, 0))
+            frame = Image.new("RGBA", (680, 300), (0, 0, 0, 0))
             frame.alpha_composite(old_frame, ((frame.width - old_width) // 2, (frame.height - old_height) // 2))
             frame.alpha_composite(next_frame, ((frame.width - width) // 2, (frame.height - height) // 2))
             frames.append(self._photo(frame))

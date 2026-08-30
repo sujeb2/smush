@@ -561,6 +561,14 @@ class RefactorTests(unittest.TestCase):
         self.assertEqual(sources["top_gradient"].size, (1080, 520))
         self.assertEqual(sources["select_sweep"].size, (150, sources["select_bg"].height))
         self.assertEqual(sources["health_4k"].size, sources["health_bg_4k"].size)
+        self.assertTrue(all(sources[name].size == (600, 250) for name in ("mode_2k", "mode_4k", "mode_catch")))
+        mode_bounds = {
+            name: sources[name].getchannel("A").point(lambda value: 255 if value > 4 else 0).getbbox()
+            for name in ("mode_2k", "mode_4k", "mode_catch")
+        }
+        self.assertTrue(all(bounds[2] - bounds[0] <= 560 for bounds in mode_bounds.values()))
+        self.assertTrue(all(bounds[3] - bounds[1] <= 230 for bounds in mode_bounds.values()))
+        self.assertGreater(mode_bounds["mode_2k"][2] - mode_bounds["mode_2k"][0], 500)
         self.assertTrue(all(sources[f"rank_{rank}"].width <= 190 for rank in "xsabcd"))
         self.assertTrue(all(sources[f"rank_{rank}"].height <= 220 for rank in "xsabcd"))
         game = MinigameUI.__new__(MinigameUI)
