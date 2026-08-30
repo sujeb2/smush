@@ -1,4 +1,5 @@
 import os
+import random
 import time
 
 from PIL import Image
@@ -103,7 +104,11 @@ class MinigameFlowMixin:
             if self.game_mode == "catch":
                 self._move_catcher(lane)
             else:
+                self._trigger_lane_help(lane)
                 self._judge(lane)
+        elif self.scene == "demonstration":
+            if self.coins_per_credit == 0 or self.credit_count > 0:
+                self._start_demonstration_entry()
         elif self.scene == "result":
             self.start_result_transition()
         elif self.scene == "total_result" and lane == 1:
@@ -548,12 +553,17 @@ class MinigameFlowMixin:
         if self.next_audio_channel is not None:
             self.next_audio_channel.stop()
             self.next_audio_channel = None
-        self.audio.stop()
-        self.scene = "game"
-        self.scene_started = time.monotonic()
         pre_roll = 2.0 + self.track.audio_lead_in / 1000.0
+        self._open_gameplay_scene("game", pre_roll, 0.0)
+        self._print(f"game loaded, notes: {len(self.track.notes)}, format: v{self.track.format_version}")
+
+    def _open_gameplay_scene(self, scene, pre_roll, audio_offset):
+        self.audio.stop()
+        self.scene = scene
+        self.scene_started = time.monotonic()
         self.game_started = self.scene_started + pre_roll
         self.game_audio_started = False
+        self.game_audio_offset = audio_offset
         self.resolved_notes = set()
         self.judgements = []
         self.counts = {key: 0 for key in (("catch", "miss") if self.game_mode == "catch" else JUDGEMENT_WEIGHT)}
@@ -580,28 +590,85 @@ class MinigameFlowMixin:
         self.feedback_visible = False
         self.game_finishing = False
         self.note_items = {}
+        self.lane_help_started = {}
+        self.lane_help_frame_shown = {}
         self._prepare_game_media(self.track)
         self._build_scene()
         delay = round(pre_roll * 1000)
         self.game_audio_job = self.root.after(delay, self._start_chart_audio)
-        self._print(f"game loaded, notes: {len(self.track.notes)}, format: v{self.track.format_version}")
+
+    def _demonstration_candidates(self):
+        excluded = {"testchart", "sample-chart"}
+        return tuple(
+            chart for chart in self.charts_by_mode["2k"]
+            if os.path.basename(chart.folder).casefold() not in excluded
+        )
+
+    def show_demonstration(self):
+        candidates = self._demonstration_candidates()
+        if not candidates:
+            self.show_ci()
+            return
+        self.demonstration_restore_state = self.game_mode, self.track
+        self.game_mode = "2k"
+        self.track = random.choice(candidates)
+        first_note_time = self.track.notes[0].time if self.track.notes else 0.0
+        start_time = max(0.0, first_note_time - 1.5)
+        self.demonstration_end_time = min(self.track.duration + 0.8, start_time + 18.0)
+        self._open_gameplay_scene("demonstration", 1.0, start_time)
+        self._print(
+            f"demonstration visible, chart: {os.path.basename(self.track.path)}, "
+            f"start: {start_time:.2f}s"
+        )
+
+    def _restore_demonstration_state(self):
+        if self.demonstration_restore_state is None:
+            return
+        self.game_mode, self.track = self.demonstration_restore_state
+        self.demonstration_restore_state = None
+
+    def _complete_demonstration(self):
+        if self.game_audio_job is not None:
+            self.root.after_cancel(self.game_audio_job)
+            self.game_audio_job = None
+        self.audio.stop(180)
+        self._restore_demonstration_state()
+        self.show_ci()
+
+    def _start_demonstration_entry(self):
+        if self.scene != "demonstration" or self.loading_phase is not None:
+            return
+        self.game_finishing = True
+        if self.game_audio_job is not None:
+            self.root.after_cancel(self.game_audio_job)
+            self.game_audio_job = None
+        self.audio.stop(180)
+        self._play_sfx("start.wav")
+        self._play_sfx("ok.wav")
+
+        def show_entry():
+            self._restore_demonstration_state()
+            self.show_entry()
+
+        self._start_loading("entry", show_entry)
 
     def _start_chart_audio(self):
         self.game_audio_job = None
-        if not self.running or self.scene != "game":
+        if not self.running or self.scene not in ("game", "demonstration"):
             return
-        self.audio.play(self.track.audio_path)
+        self.audio.play(self.track.audio_path, start_seconds=self.game_audio_offset)
         self.game_started = time.monotonic()
         self.game_audio_started = True
         self.game_video_next_frame = self.game_started
         self._print(f"chart started: {os.path.basename(self.track.path)}")
 
     def _game_elapsed(self):
+        audio_offset = getattr(self, "game_audio_offset", 0.0)
         if self.game_audio_started:
             position = self.audio.position_seconds()
             if position is not None:
-                return position
-        return time.monotonic() - self.game_started
+                return audio_offset + position
+        return audio_offset + time.monotonic() - self.game_started
 
     def show_result(self):
         if self.scene != "game":

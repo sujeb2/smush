@@ -31,6 +31,8 @@ class ProductionFrameFactory(
         self.result_morph_source_frames = ()
         self.judgement_source_frames = {}
         self.catch_burst_source_frames = ()
+        self.lane_help_source_frames = {}
+        self.demonstration_source_frames = {}
 
 
 class ProductionAssets:
@@ -110,6 +112,8 @@ class ProductionAssets:
             "bad": lambda: self.factory._judgement_animation_sources("bad"),
             "miss": lambda: self.factory._judgement_animation_sources("miss"),
             "catch_burst": self.factory._catch_burst_sources,
+            "lane_help_2k_0": lambda: self.factory._lane_help_animation_sources("lane_help_2k_0"),
+            "demonstration_able": lambda: self.factory._demonstration_overlay_sources("demonstration_able"),
         }
         self.sequence_cache[name] = tuple(self._surface(frame) for frame in methods[name]())
         return self.sequence_cache[name]

@@ -199,6 +199,10 @@ class MinigamePreloadMixin:
         self._catch_burst_sources()
         for name in JUDGEMENT_WEIGHT:
             self._judgement_animation_sources(name)
+        for name in ("lane_help_2k_0", "lane_help_2k_1", "lane_help_4k_0", "lane_help_4k_1"):
+            self._lane_help_animation_sources(name)
+        for name in ("demonstration_able", "demonstration_coin"):
+            self._demonstration_overlay_sources(name)
 
     def _preload_chart_media(self):
         charts = tuple({chart.path: chart for mode in self.charts_by_mode.values() for chart in mode}.values())
@@ -302,6 +306,12 @@ class MinigamePreloadMixin:
         self._set_preload_stage("GAMEPLAY RENDERER", "CHECKING", announce=True)
         self.preloaded_judgement_frames = {name: [] for name in JUDGEMENT_WEIGHT}
         self.preloaded_catch_burst_frames = []
+        self.preloaded_lane_help_frames = {
+            name: [] for name in ("lane_help_2k_0", "lane_help_2k_1", "lane_help_4k_0", "lane_help_4k_1")
+        }
+        self.preloaded_demonstration_frames = {
+            name: [] for name in ("demonstration_able", "demonstration_coin")
+        }
         self.preload_render_tasks = [
             ("asset", name, source)
             for name, source in self.sources.items()
@@ -314,6 +324,16 @@ class MinigamePreloadMixin:
         self.preload_render_tasks.extend(
             ("catch", None, frame)
             for frame in self._catch_burst_sources()
+        )
+        self.preload_render_tasks.extend(
+            ("lane_help", name, frame)
+            for name in self.preloaded_lane_help_frames
+            for frame in self._lane_help_animation_sources(name)
+        )
+        self.preload_render_tasks.extend(
+            ("demonstration", name, frame)
+            for name in self.preloaded_demonstration_frames
+            for frame in self._demonstration_overlay_sources(name)
         )
         self.preload_render_index = 0
         self.root.after(1, self._finish_preload_batch)
@@ -331,8 +351,12 @@ class MinigamePreloadMixin:
                         self.photo_cache[key] = self._scaled_photo(source)
                 elif kind == "judgement":
                     self.preloaded_judgement_frames[name].append(self._scaled_photo(source))
-                else:
+                elif kind == "catch":
                     self.preloaded_catch_burst_frames.append(self._scaled_photo(source))
+                elif kind == "lane_help":
+                    self.preloaded_lane_help_frames[name].append(self._scaled_photo(source))
+                else:
+                    self.preloaded_demonstration_frames[name].append(self._scaled_photo(source))
                 self.preload_render_index += 1
                 if time.perf_counter() >= deadline:
                     self.root.after(1, self._finish_preload_batch)
@@ -345,6 +369,12 @@ class MinigamePreloadMixin:
             name: tuple(frames) for name, frames in self.preloaded_judgement_frames.items()
         }
         self.preloaded_catch_burst_frames = tuple(self.preloaded_catch_burst_frames)
+        self.preloaded_lane_help_frames = {
+            name: tuple(frames) for name, frames in self.preloaded_lane_help_frames.items()
+        }
+        self.preloaded_demonstration_frames = {
+            name: tuple(frames) for name, frames in self.preloaded_demonstration_frames.items()
+        }
         self.preloaded_gameplay_scale = round(self.scale, 5)
         self.preload_render_tasks = []
         self._set_preload_stage("GAMEPLAY RENDERER", "OK")
@@ -367,6 +397,14 @@ class MinigamePreloadMixin:
         self.preloaded_catch_burst_frames = tuple(
             self._scaled_photo(frame) for frame in self._catch_burst_sources()
         )
+        self.preloaded_lane_help_frames = {
+            name: tuple(self._scaled_photo(frame) for frame in self._lane_help_animation_sources(name))
+            for name in ("lane_help_2k_0", "lane_help_2k_1", "lane_help_4k_0", "lane_help_4k_1")
+        }
+        self.preloaded_demonstration_frames = {
+            name: tuple(self._scaled_photo(frame) for frame in self._demonstration_overlay_sources(name))
+            for name in ("demonstration_able", "demonstration_coin")
+        }
         self.preloaded_gameplay_scale = scale
 
     def _fail_preload(self, message):

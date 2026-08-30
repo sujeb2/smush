@@ -31,7 +31,7 @@ class MinigameGameSceneMixin:
             self.health_fill_x = 970.0
             self.health_fill_y = 1819.0
             health_background_name = "health_bg_4k"
-            self._image("main_layer_4k", self.lane_origin_x, 470, anchor="nw", tags=("game",))
+            self._image("main_layer_4k", self.lane_origin_x, 520, anchor="nw", tags=("game",))
             self.note_photos = tuple(self._asset_photo(f"note_4k_{lane % 2}") for lane in range(4))
             line_name = "line_4k"
         else:
@@ -43,9 +43,11 @@ class MinigameGameSceneMixin:
             self.health_fill_x = 853.0
             self.health_fill_y = 1554.0
             health_background_name = "health_bg"
-            self._image("main_layer", self.lane_origin_x, 470, anchor="nw", tags=("game",))
+            self._image("main_layer", self.lane_origin_x, 520, anchor="nw", tags=("game",))
             self.note_photos = (self._asset_photo("note_0"), self._asset_photo("note_1"))
             line_name = "line"
+        self._ensure_preloaded_gameplay_photos()
+        self._build_lane_help()
         self.combo_item = self.canvas.create_image(self._x(540), self._y(790), anchor="center", tags=("game_combo",))
         if self.combo > 0:
             self.canvas.itemconfigure(self.combo_item, image=self._combo_photo(self.combo, 78))
@@ -60,7 +62,6 @@ class MinigameGameSceneMixin:
             self._x(self.health_fill_x), self._y(self.health_fill_y), anchor="s", tags=("game_health",),
         )
         self.judgement_item = self.canvas.create_image(self._x(540), self._y(1715), anchor="center", tags=("game_feedback",))
-        self._ensure_preloaded_gameplay_photos()
         self.judgement_frames = self.preloaded_judgement_frames
         self._update_health_image()
 
@@ -130,6 +131,75 @@ class MinigameGameSceneMixin:
         draw.text(((340 - number_box[2] + number_box[0]) / 2, 68 - number_box[1]), number, font=number_font, fill="white")
         self.combo_photo_cache[key] = self._scaled_photo(image)
         return self.combo_photo_cache[key]
+
+    def _lane_help_animation_sources(self, name):
+        if name in self.lane_help_source_frames:
+            return self.lane_help_source_frames[name]
+        source = self.sources[name]
+        frames = []
+        for index in range(18):
+            progress = index / 17
+            if progress < 0.18:
+                opacity = progress / 0.18
+            else:
+                opacity = pow(max(0.0, 1 - (progress - 0.18) / 0.82), 1.35)
+            rise = 0.7 + 0.3 * (1 - pow(1 - min(1.0, progress / 0.32), 3))
+            height = max(1, round(source.height * rise))
+            light = source.resize((source.width, height), Image.Resampling.BILINEAR)
+            alpha = light.getchannel("A").point(lambda value, factor=opacity: round(value * factor))
+            light.putalpha(alpha)
+            frame = Image.new("RGBA", source.size, (0, 0, 0, 0))
+            frame.alpha_composite(light, (0, source.height - height))
+            frames.append(frame)
+        self.lane_help_source_frames[name] = tuple(frames)
+        return self.lane_help_source_frames[name]
+
+    def _demonstration_overlay_sources(self, name):
+        if name in self.demonstration_source_frames:
+            return self.demonstration_source_frames[name]
+        source = self.sources[name]
+        width = round(source.width * 1.025)
+        height = round(source.height * 1.025)
+        frames = []
+        for index in range(30):
+            phase = index / 30 * math.tau
+            opacity = 0.48 + 0.25 * (0.5 + 0.5 * math.sin(phase))
+            scale = 0.985 + 0.025 * (0.5 + 0.5 * math.sin(phase - math.pi / 2))
+            image = source.resize(
+                (max(1, round(source.width * scale)), max(1, round(source.height * scale))),
+                Image.Resampling.LANCZOS,
+            )
+            alpha = image.getchannel("A").point(lambda value, factor=opacity: round(value * factor))
+            image.putalpha(alpha)
+            frame = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            frame.alpha_composite(image, ((width - image.width) // 2, (height - image.height) // 2))
+            frames.append(frame)
+        self.demonstration_source_frames[name] = tuple(frames)
+        return self.demonstration_source_frames[name]
+
+    def _build_lane_help(self):
+        lane_count = 4 if self.game_mode == "4k" else 2
+        mode = "4k" if lane_count == 4 else "2k"
+        self.lane_help_items = []
+        for lane in range(lane_count):
+            name = f"lane_help_{mode}_{lane % 2}"
+            frames = self.preloaded_lane_help_frames[name]
+            item = self.canvas.create_image(
+                self._x(self.lane_origin_x + lane * self.lane_width),
+                self._y(self.judgement_line_y + 33), image=frames[0],
+                anchor="sw", tags=("lane_help",),
+            )
+            self.lane_help_items.append((item, frames))
+
+    def _build_demonstration_overlay(self):
+        name = "demonstration_able" if self.coins_per_credit == 0 or self.credit_count > 0 else "demonstration_coin"
+        self.demonstration_overlay_name = name
+        self.demonstration_frames = self.preloaded_demonstration_frames[name]
+        self.demonstration_frame_shown = 0
+        self.demonstration_item = self.canvas.create_image(
+            self._x(540), self._y(980), image=self.demonstration_frames[0],
+            anchor="center", tags=("demonstration_overlay",),
+        )
 
     def _result_wave_sources(self, name):
         if name in self.result_wave_source_frames:

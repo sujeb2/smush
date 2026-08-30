@@ -46,6 +46,8 @@ CATALOG = (
     AnimationSpec("MINIGAME", "2K Note Travel", 1.54, 60, "note", _keys(1.54, (0, "SPAWN"), (.88, "APPROACH"), (1, "JUDGE")), "2K"),
     AnimationSpec("MINIGAME", "4K Note Travel", 1.54, 60, "note", _keys(1.54, (0, "SPAWN"), (.88, "APPROACH"), (1, "JUDGE")), "4K"),
     AnimationSpec("MINIGAME", "Hold Note Travel", 1.54, 60, "note", _keys(1.54, (0, "SPAWN"), (.62, "HOLD START"), (1, "HOLD END")), "HOLD"),
+    AnimationSpec("MINIGAME", "Lane Input Help", .30, 60, "lane_help", _keys(.30, (0, "INPUT"), (.18, "FLASH"), (1, "FADE"))),
+    AnimationSpec("MINIGAME", "Demonstration Overlay Pulse", 1.50, 20, "demonstration", _keys(1.50, (0, "BASE"), (.25, "BRIGHT"), (.75, "DIM"), (1, "LOOP"))),
     AnimationSpec("MINIGAME", "Catch Object Fall", 1.27, 60, "catch_fall", _keys(1.27, (0, "SPAWN"), (.88, "APPROACH"), (1, "CATCH"))),
     AnimationSpec("MINIGAME", "Result Card Reveal", 1.05, 60, "result", _keys(1.05, (0, "BELOW"), (.72, "OVERSHOOT"), (1, "SETTLE"))),
     AnimationSpec("MINIGAME", "Result Rank Reveal", .72, 60, "rank", _keys(.72, (0, "HIDDEN"), (.38, "POP"), (.64, "REBOUND"), (1, "SETTLE"))),
@@ -338,6 +340,38 @@ class PreviewRenderer:
                     name = f"note_4k_{lane % 2}" if lanes == 4 else f"note_{lane % 2}"
                     lane_note = self.assets.scaled(name, (round(lane_width), note.get_height()))
                     surface.blit(lane_note, (round(playfield.left + lane * lane_width), round(note_y)))
+
+    def _draw_lane_help(self, surface, area, progress, spec):
+        layer = self.assets.fitted("main_layer", (300, area.height - 20))
+        playfield = layer.get_rect(center=area.center)
+        surface.blit(layer, playfield)
+        line_y = playfield.top + round((1560 - 470) / 1450 * playfield.height)
+        line = self.assets.scaled("line", (playfield.width, max(4, round(33 / 1450 * playfield.height))))
+        surface.blit(line, (playfield.left, line_y))
+        frames = self.assets.sequence("lane_help_2k_0")
+        frame = frames[min(len(frames) - 1, round(progress * (len(frames) - 1)))]
+        lane_width = playfield.width // 2
+        scale = lane_width / frame.get_width()
+        frame = pygame.transform.smoothscale(
+            frame, (lane_width, max(1, round(frame.get_height() * scale))),
+        )
+        surface.blit(frame, frame.get_rect(bottomleft=(playfield.left, line_y + 8)))
+
+    def _draw_demonstration(self, surface, area, progress, spec):
+        frame = self.assets.video_frame(progress * spec.duration, True)
+        if frame is not None:
+            maximum = (700, area.height - 20)
+            scale = min(maximum[0] / frame.get_width(), maximum[1] / frame.get_height())
+            frame = pygame.transform.smoothscale(
+                frame, (round(frame.get_width() * scale), round(frame.get_height() * scale)),
+            )
+            surface.blit(frame, frame.get_rect(center=area.center))
+        frames = self.assets.sequence("demonstration_able")
+        overlay = frames[min(len(frames) - 1, round(progress * (len(frames) - 1)))]
+        overlay = pygame.transform.smoothscale(
+            overlay, (min(area.width - 100, overlay.get_width()), min(150, overlay.get_height())),
+        )
+        surface.blit(overlay, overlay.get_rect(center=area.center))
 
     def _draw_catch_fall(self, surface, area, progress, spec):
         field = pygame.Rect(0, 0, 620, area.height - 20)

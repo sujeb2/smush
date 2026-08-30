@@ -64,7 +64,8 @@ class AudioPlayer:
             channel = self.sfx_cache[path].play()
             if channel is not None:
                 channel.set_volume(min(1.0, max(0.0, float(volume))))
-            self._print(f"[AudioManager] playing sfx: {os.path.basename(path)}")
+            if(os.path.basename(path) != "hitsound.wav"):
+                self._print(f"[AudioManager] playing sfx: {os.path.basename(path)}")
             return channel
         except Exception as error:
             self._print(f"[AudioManager] sfx playback failed: {error}")

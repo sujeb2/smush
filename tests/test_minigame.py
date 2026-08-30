@@ -105,10 +105,10 @@ class ScoreTests(unittest.TestCase):
             game._resolve_catch(index, True)
         self.assertEqual((game.combo, game.score, game.counts["catch"]), (5, 7500, 5))
         self.assertEqual(len(bursts), 1)
-        self.assertEqual(hitsounds, [("hitsound.wav", 0.78)] * 5)
+        self.assertEqual(hitsounds, [("hitsound.wav", 0.45)] * 5)
         game._resolve_catch(5, False)
         self.assertEqual((game.combo, game.health, game.counts["miss"]), (0, 93.0, 1))
-        self.assertEqual(hitsounds, [("hitsound.wav", 0.78)] * 5)
+        self.assertEqual(hitsounds, [("hitsound.wav", 0.45)] * 5)
 
     def test_note_hits_and_hold_ticks_play_hitsound_but_misses_do_not(self):
         hitsounds = []
@@ -136,7 +136,7 @@ class ScoreTests(unittest.TestCase):
         game._resolve_note(0, "perfect")
         game._update_hold_ticks(0.25)
         game._resolve_note(1, "miss")
-        self.assertEqual(hitsounds, [("hitsound.wav", 0.78), ("hitsound.wav", 0.62)])
+        self.assertEqual(hitsounds, [("hitsound.wav", 0.45), ("hitsound.wav", 0.62)])
 
     def test_catcher_uses_momentum_instead_of_fixed_steps(self):
         positions = []
@@ -446,6 +446,65 @@ class SelectionTests(unittest.TestCase):
 
 
 class RefactorTests(unittest.TestCase):
+    def test_attract_title_routes_to_demonstration(self):
+        transitions = []
+        game = MinigameUI.__new__(MinigameUI)
+        game.loading_phase = None
+        game.title_entry_morph_started = None
+        game.title_fade_started = None
+        game.title_audio_started = True
+        game.title_audio_deadline = 0.0
+        game.audio = SimpleNamespace(available=True, is_playing=lambda: False)
+        game._animate_title_fade = lambda now: None
+        game.show_demonstration = lambda: None
+        game._start_loading = lambda target, action: transitions.append((target, action))
+        game._animate_title(1.0)
+        self.assertEqual(transitions, [("demonstration", game.show_demonstration)])
+
+    def test_demonstration_uses_gameplay_header(self):
+        labels = []
+        game = MinigameUI.__new__(MinigameUI)
+        game.scene = "demonstration"
+        game.settings = {"mode": "EVENT"}
+        game.coins_per_credit = 0
+        game.credit_count = 0
+        game.coin_count = 0
+        game._track_key = lambda: "1"
+        game._track_position = lambda: 1
+        game._image = lambda *args, **kwargs: None
+        game._text_image = lambda text, *args, **kwargs: labels.append(text) or len(labels)
+        game._build_header()
+        self.assertEqual(labels[:2], ["TRACK 1", "GAME"])
+
+    def test_demonstration_excludes_test_and_sample_charts(self):
+        game = MinigameUI.__new__(MinigameUI)
+        game.charts_by_mode = {
+            "2k": (
+                SimpleNamespace(folder="/charts/testchart"),
+                SimpleNamespace(folder="/charts/sample-chart"),
+                SimpleNamespace(folder="/charts/music"),
+            ),
+        }
+        self.assertEqual(
+            [chart.folder for chart in game._demonstration_candidates()],
+            ["/charts/music"],
+        )
+
+    def test_lane_help_and_demonstration_use_translucent_animation_frames(self):
+        game = MinigameUI.__new__(MinigameUI)
+        game.sources = {
+            "lane_help_2k_0": Image.new("RGBA", (20, 60), "white"),
+            "demonstration_able": Image.new("RGBA", (80, 20), "white"),
+        }
+        game.lane_help_source_frames = {}
+        game.demonstration_source_frames = {}
+        lane_frames = game._lane_help_animation_sources("lane_help_2k_0")
+        demonstration_frames = game._demonstration_overlay_sources("demonstration_able")
+        self.assertEqual((len(lane_frames), len(demonstration_frames)), (18, 30))
+        self.assertIsNone(lane_frames[0].getbbox())
+        self.assertIsNotNone(lane_frames[4].getbbox())
+        self.assertLess(max(demonstration_frames[0].getchannel("A").getextrema()), 255)
+
     def test_gameplay_scroll_speed_shortens_note_lead_time(self):
         game = MinigameUI.__new__(MinigameUI)
         game.settings = {"scroll_speed": 1.30}

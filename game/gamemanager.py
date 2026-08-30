@@ -101,7 +101,7 @@ class MinigameGameplayMixin:
         self.counts[judgement] += 1
         previous_health = self.health
         if caught:
-            self._play_sfx("hitsound.wav", volume=0.78)
+            self._play_sfx("hitsound.wav", volume=0.45)
             self.health = min(100.0, self.health + 0.55)
             self._advance_combo()
             if self.counts["catch"] % 5 == 0:
@@ -152,7 +152,7 @@ class MinigameGameplayMixin:
         if judgement == "miss":
             self._break_combo()
         else:
-            self._play_sfx("hitsound.wav", volume=0.78)
+            self._play_sfx("hitsound.wav", volume=0.45)
             self._advance_combo()
             note = self.track.notes[index]
             ticks = tuple(tick for tick in hold_tick_times(note.time, note.end_time) if tick > self._game_elapsed())
@@ -310,7 +310,7 @@ class MinigameGameplayMixin:
             ticks = state["ticks"]
             while state["next"] < len(ticks) and elapsed >= ticks[state["next"]]:
                 state["next"] += 1
-                self._play_sfx("hitsound.wav", volume=0.62)
+                self._play_sfx("hitsound.wav", volume=0.45)
                 previous_health = self.health
                 self.health = min(100.0, self.health + 0.08)
                 self._advance_combo()
@@ -333,8 +333,26 @@ class MinigameGameplayMixin:
             self.canvas.itemconfigure(self.judgement_item, image=frames[frame])
             self.feedback_frame_shown = frame
 
+    def _trigger_lane_help(self, lane):
+        if lane < 0 or lane >= len(self.lane_help_items):
+            return
+        self.lane_help_started[lane] = time.monotonic()
+        self.lane_help_frame_shown[lane] = -1
+
+    def _animate_lane_help(self, now):
+        for lane, started in tuple(self.lane_help_started.items()):
+            item, frames = self.lane_help_items[lane]
+            progress = min(1.0, max(0.0, (now - started) / 0.3))
+            frame = min(len(frames) - 1, round(progress * (len(frames) - 1)))
+            if frame != self.lane_help_frame_shown.get(lane):
+                self.canvas.itemconfigure(item, image=frames[frame])
+                self.lane_help_frame_shown[lane] = frame
+            if progress >= 1.0:
+                self.lane_help_started.pop(lane, None)
+                self.lane_help_frame_shown.pop(lane, None)
+
     def _update_catch_game_frame(self, now):
-        if self.scene != "game" or self.game_started is None:
+        if self.scene not in ("game", "demonstration") or self.game_started is None:
             return
         elapsed = self._game_elapsed()
         self._animate_catcher(now)
@@ -373,16 +391,22 @@ class MinigameGameplayMixin:
             self._start_loading("result", self.show_result)
 
     def _update_game_frame(self, now):
-        if self.scene != "game" or self.game_started is None:
+        if self.scene not in ("game", "demonstration") or self.game_started is None:
             return
         if self.game_mode == "catch":
             self._update_catch_game_frame(now)
             return
         elapsed = self._game_elapsed()
         self._update_hold_ticks(elapsed)
-        for index, note in enumerate(self.track.notes):
-            if index not in self.resolved_notes and elapsed > note.time + BAD_WINDOW:
-                self._resolve_note(index, "miss")
+        if self.scene == "demonstration":
+            for index, note in enumerate(self.track.notes):
+                if index not in self.resolved_notes and elapsed >= note.time:
+                    self._trigger_lane_help(note.lane)
+                    self._resolve_note(index, "perfect")
+        else:
+            for index, note in enumerate(self.track.notes):
+                if index not in self.resolved_notes and elapsed > note.time + BAD_WINDOW:
+                    self._resolve_note(index, "miss")
         lead_time = self._scroll_lead_time(2.0)
         start_y = 505
         hit_y = self.judgement_line_y
@@ -429,13 +453,21 @@ class MinigameGameplayMixin:
                     if item is not None:
                         self.canvas.delete(item)
         self.canvas.tag_raise("game_line")
+        self.canvas.tag_raise("lane_help")
+        self.canvas.tag_raise("game_note")
         self.canvas.tag_raise("game_combo")
         self.canvas.tag_raise("game_feedback")
         self.canvas.tag_raise("game_health")
         self._animate_combo(now)
         self._animate_health(now)
+        self._animate_lane_help(now)
         self._update_feedback_image()
-        if not self.game_finishing and (self.health <= 0 or elapsed >= self.track.duration + 1.6):
+        demonstration_finished = self.scene == "demonstration" and elapsed >= self.demonstration_end_time
+        gameplay_finished = self.scene == "game" and (self.health <= 0 or elapsed >= self.track.duration + 1.6)
+        if not self.game_finishing and (demonstration_finished or gameplay_finished):
             self.game_finishing = True
             self.audio.stop(180)
-            self._start_loading("result", self.show_result)
+            if self.scene == "demonstration":
+                self._start_loading("ci", self._complete_demonstration)
+            else:
+                self._start_loading("result", self.show_result)

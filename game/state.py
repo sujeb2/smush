@@ -104,6 +104,8 @@ class MinigameStateMixin:
         self.preload_render_index = 0
         self.preloaded_judgement_frames = {}
         self.preloaded_catch_burst_frames = ()
+        self.preloaded_lane_help_frames = {}
+        self.preloaded_demonstration_frames = {}
         self.preloaded_gameplay_scale = None
         self.chart_preview_sources = {}
         self.chart_game_sources = {}
@@ -113,6 +115,7 @@ class MinigameStateMixin:
     def _initialize_gameplay_state(self):
         self.game_started = None
         self.game_audio_started = False
+        self.game_audio_offset = 0.0
         self.game_audio_job = None
         self.game_finishing = False
         self.resolved_notes = set()
@@ -152,6 +155,17 @@ class MinigameStateMixin:
         self.catch_bursts = []
         self.catch_burst_frames = ()
         self.catch_burst_source_frames = ()
+        self.lane_help_source_frames = {}
+        self.lane_help_items = []
+        self.lane_help_started = {}
+        self.lane_help_frame_shown = {}
+        self.demonstration_source_frames = {}
+        self.demonstration_item = None
+        self.demonstration_frames = ()
+        self.demonstration_frame_shown = -1
+        self.demonstration_overlay_name = None
+        self.demonstration_restore_state = None
+        self.demonstration_end_time = 0.0
         self.game_media_item = None
         self.game_media_photo = None
         self.game_media_path = None

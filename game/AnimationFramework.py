@@ -334,7 +334,23 @@ class MinigameAnimationMixin:
             and self.title_fade_started is None
             and (audio_finished or fallback_finished)
         ):
-            self._start_loading("ci", self.show_ci)
+            self._start_loading("demonstration", self.show_demonstration)
+
+    def _animate_demonstration(self, now):
+        self._animate_game_media(now)
+        self._update_game_frame(now)
+        if self.demonstration_item is None or not self.demonstration_frames:
+            return
+        name = "demonstration_able" if self.coins_per_credit == 0 or self.credit_count > 0 else "demonstration_coin"
+        if name != self.demonstration_overlay_name:
+            self.demonstration_overlay_name = name
+            self.demonstration_frames = self.preloaded_demonstration_frames[name]
+            self.demonstration_frame_shown = -1
+        frame = int((now - self.scene_started) * 20) % len(self.demonstration_frames)
+        if frame != self.demonstration_frame_shown:
+            self.canvas.itemconfigure(self.demonstration_item, image=self.demonstration_frames[frame])
+            self.demonstration_frame_shown = frame
+        self.canvas.tag_raise("demonstration_overlay")
 
     def _animate_ci(self, now):
         self._animate_title_fade(now)
@@ -437,6 +453,8 @@ class MinigameAnimationMixin:
         elif self.scene == "game":
             self._animate_game_media(now)
             self._update_game_frame(now)
+        elif self.scene == "demonstration":
+            self._animate_demonstration(now)
         elif self.scene == "result":
             self._animate_result(now)
             remaining = max(0, int(self.result_deadline - now + 0.999))

@@ -12,7 +12,7 @@ class MinigameSceneMixin:
             return
         if self.scene not in ("select", "title_select"):
             self._close_select_video()
-        if self.scene != "game":
+        if self.scene not in ("game", "demonstration"):
             self._close_game_video()
         self._prepare_scene()
         self.scene_photos = []
@@ -77,6 +77,13 @@ class MinigameSceneMixin:
         self.catcher_item = None
         self.catch_bursts = []
         self.catch_burst_frames = ()
+        self.lane_help_items = []
+        self.lane_help_started = {}
+        self.lane_help_frame_shown = {}
+        self.demonstration_item = None
+        self.demonstration_frames = ()
+        self.demonstration_frame_shown = -1
+        self.demonstration_overlay_name = None
         self.health_fill_item = None
         self.health_dynamic_photo = None
         self.health_visible_state = None
@@ -107,8 +114,10 @@ class MinigameSceneMixin:
             self._x(0), self._y(0), self._x(DESIGN_WIDTH), self._y(DESIGN_HEIGHT),
             fill="#bd98e8", outline="",
         )
-        if self.scene == "game":
+        if self.scene in ("game", "demonstration"):
             self._build_game()
+            if self.scene == "demonstration":
+                self._build_demonstration_overlay()
             return
         self._image("top_gradient", 0, 0, anchor="nw", tags=("background",))
         if self.scene == "ci":
@@ -200,6 +209,7 @@ class MinigameSceneMixin:
             "select": (track_label, "SELECT"),
             "next": (track_label, "NEXT"),
             "game": (track_label, "GAME"),
+            "demonstration": (track_label, "GAME"),
             "result": (track_label, "RESULT"),
             "total_result": ("ENDING", "<3"),
             "ending": ("ENDING", "<3"),
