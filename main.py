@@ -4,13 +4,22 @@ import os
 import sys
 import threading
 import time
+import traceback
 from datetime import datetime
 
 from dependency_updater import DependencyUpdateError, load_requirements, requirement_name, update_dependencies
 from gui import RecyclingUI
 from game.minigame import MinigameUI
 from serial_arduino import SerialIO
+from startup_health import (
+    StartupHealthError,
+    check_disk,
+    check_runtime_files,
+    clear_previous_error,
+    previous_error_details,
+)
 from test_mode import TestModeUI
+from ui_framework import UnrecoverableErrorUI
 
 def find_compiled_dir():
     if "__compiled__" in globals() or getattr(sys, "frozen", False):
@@ -86,7 +95,7 @@ class Main:
                 timeout=config["SERIAL"].getint("SerialTimeout"),
             )
         except Exception as error:
-            self.ui.post_status(f"Arduino unavailable: {error}")
+            self.ui.post_serial_failure(error)
             return
         self.ui.post_serial(self.serial)
 
@@ -228,6 +237,16 @@ class Main:
 
         try:
             status("start smush interface...")
+            status("Checking disk...")
+            disk_usage = check_disk(base)
+            status(f"Disk check passed ({disk_usage.free // (1024 * 1024)} MB free).")
+            previous_error = previous_error_details(base)
+            if previous_error is not None:
+                status(
+                    f"Previous error detected ({previous_error.get('code', 'UNKNOWN')}); checking files...",
+                )
+                check_runtime_files(base)
+                status("File integrity check passed.")
             os.makedirs(os.path.join(base, "files", "captures"), exist_ok=True)
             if self.args.demo:
                 status("Demo mode enabled.")
@@ -240,6 +259,7 @@ class Main:
                     self.ui.post_error("RUNTIME_FAILURE", f"AN UNEXPECTED ERROR HAS OCCURRED.\nMORE INFORMATION IS PROVIDED IN THE CONSOLE, PLEASE RESTART THE MACHINE.")
                 else:
                     status("Initialization complete.")
+                    clear_previous_error(base)
                     self.ui.post_ready()
                 return
             if config["GENERIC"].getboolean("SkipSerialCheck"):
@@ -269,6 +289,7 @@ class Main:
             if self.serial is None:
                 self._wait_for_startup(started)
                 status("Initialization complete without Arduino.")
+                clear_previous_error(base)
                 self.ui.post_ready()
                 return
             status("Loading recognition model...")
@@ -283,10 +304,14 @@ class Main:
                 return
             self._wait_for_startup(started)
             status("Initialization complete.")
+            clear_previous_error(base)
             self.ui.post_ready()
             result = self.model.liveFeedCapture()
             if result == 1 and self.ui.running:
                 self.ui.post_error("WEBCAM_STREAM_LOST", "The webcam stopped providing frames.\nCheck the camera connection and restart SMUSH.".upper())
+        except StartupHealthError as error:
+            if self.ui.running:
+                self.ui.post_error("STARTUP_HEALTH_CHECK_FAILED", str(error).upper())
         except BaseException as error:
             if self.ui.running:
                 self.ui.post_error("RUNTIME_FAILURE", str(error))
@@ -358,5 +383,34 @@ def parse_args():
     parser.add_argument("--minigame", action="store_true")
     return parser.parse_args()
 
+
+def run():
+    args = parse_args()
+    try:
+        Main(args)
+    except Exception as error:
+        detail = traceback.format_exc()
+        print(detail, file=sys.stderr, end="")
+        if args.headless:
+            return
+        pygame_module = sys.modules.get("pygame")
+        if pygame_module is not None:
+            pygame_module.display.quit()
+        try:
+            import tkinter as tk
+
+            if tk._default_root is not None:
+                tk._default_root.destroy()
+                tk._default_root = None
+        except Exception:
+            pass
+        error_ui = UnrecoverableErrorUI(
+            type(error).__name__.upper(),
+            detail,
+            fullscreen=config["UI"].getboolean("Fullscreen", fallback=True) and not args.windowed,
+        )
+        error_ui.run()
+
+
 if __name__ == "__main__":
-    Main(parse_args())
+    run()

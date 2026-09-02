@@ -27,6 +27,20 @@ class SerialIO:
             self.ser.write(data.encode('utf-8'))
             print(f'[{self.timestamp}] [SerialIO] write: {data}')
 
+    def write_command(self, command):
+        """Write one newline-delimited command to the Arduino."""
+        command = str(command).strip()
+        if not command or "\n" in command or "\r" in command:
+            raise ValueError("serial command must be one non-empty line")
+        self.write(f"{command}\n")
+
+    def set_switch_led(self, switch_number, enabled):
+        """Set one of the four illuminated switch LEDs on or off."""
+        if isinstance(switch_number, bool) or switch_number not in range(1, 5):
+            raise ValueError("switch_number must be an integer from 1 to 4")
+        state = "ON" if enabled else "OFF"
+        self.write_command(f"SW{switch_number}_{state}")
+
     def read(self):
         if self.ser.is_open and self.ser.in_waiting > 0:
             data = self.ser.read(self.ser.in_waiting)

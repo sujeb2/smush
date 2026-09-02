@@ -15,6 +15,7 @@ class MinigameStateMixin:
         self.event_queue = queue.Queue()
         self.serial_buffer = ""
         self.serial_buffer_updated_at = 0.0
+        self.serial_connection_failed = False
 
     def _initialize_timing_state(self, now):
         self.scene = "preload"
@@ -60,6 +61,7 @@ class MinigameStateMixin:
         self.particle_item = None
         self.particle_base_y = 0
         self.fade_item = None
+        self.serial_failure_item = None
         self.score_item = None
         self.health_fill_item = None
         self.health_fill_x = 853.0

@@ -6,6 +6,7 @@ import time
 import unittest
 from dataclasses import replace
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -558,6 +559,7 @@ class RefactorTests(unittest.TestCase):
             "select_sweep", "catch_particle", "catch_scroll",
         }
         self.assertTrue(required <= set(sources))
+        self.assertEqual(sources["fail_io"].size, (713, 154))
         self.assertEqual(sources["top_gradient"].size, (1080, 520))
         self.assertEqual(sources["select_sweep"].size, (150, sources["select_bg"].height))
         self.assertEqual(sources["health_4k"].size, sources["health_bg_4k"].size)
@@ -609,6 +611,17 @@ class RefactorTests(unittest.TestCase):
         self.assertEqual(pressed, [0, 1, 2, 3])
         self.assertEqual(coins, [True])
 
+    def test_serial_failure_banner_is_placed_below_title_prompt(self):
+        images = []
+        game = MinigameUI.__new__(MinigameUI)
+        game.scene = "title"
+        game.serial_connection_failed = True
+        game.serial_failure_item = None
+        game._image = lambda name, x, y, **kwargs: images.append((name, x, y, kwargs)) or len(images)
+        game._text_image = lambda *args, **kwargs: None
+        game._build_title()
+        self.assertIn(("fail_io", 540, 1445, {"tags": ("title", "serial_failure")}), images)
+
     def test_game_media_is_sized_and_dimmed_for_playfield(self):
         game = MinigameUI.__new__(MinigameUI)
         source = game._game_media_source(Image.new("RGB", (320, 180), "white"))
@@ -642,6 +655,8 @@ class RefactorTests(unittest.TestCase):
     def test_preload_worker_runs_independent_groups_on_multiple_threads(self):
         game = MinigameUI.__new__(MinigameUI)
         game.event_queue = queue.Queue()
+        game.base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        game.recovery_startup = False
         game._load_assets = lambda: None
         thread_ids = set()
         lock = threading.Lock()
@@ -660,12 +675,41 @@ class RefactorTests(unittest.TestCase):
             "_warm_preload_audio_files",
         ):
             setattr(game, name, work)
-        game._run_preload()
+        with patch("game.PreloadManager.check_disk"):
+            game._run_preload()
         events = []
         while not game.event_queue.empty():
-            events.append(game.event_queue.get_nowait()[0])
+            events.append(game.event_queue.get_nowait())
         self.assertGreater(len(thread_ids), 1)
-        self.assertIn("preload_ready", events)
+        self.assertIn(("preload_stage", "DISK CHECK", "OK"), events)
+        self.assertIn(("preload_stage", "FILE INTEGRITY", "SKIPPED"), events)
+        self.assertIn(("preload_ready",), events)
+
+    def test_recovery_preload_runs_file_integrity_check(self):
+        game = MinigameUI.__new__(MinigameUI)
+        game.event_queue = queue.Queue()
+        game.base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        game.recovery_startup = True
+        for name in (
+            "_load_assets",
+            "_preload_entry_animation_sources",
+            "_preload_warning_animation_sources",
+            "_preload_result_animation_sources",
+            "_preload_gameplay_animation_sources",
+            "_preload_chart_media",
+            "_warm_preload_audio_files",
+        ):
+            setattr(game, name, lambda: None)
+        with (
+            patch("game.PreloadManager.check_disk"),
+            patch("game.PreloadManager.check_runtime_files") as check_files,
+        ):
+            game._run_preload()
+        check_files.assert_called_once_with(game.base)
+        events = []
+        while not game.event_queue.empty():
+            events.append(game.event_queue.get_nowait())
+        self.assertIn(("preload_stage", "FILE INTEGRITY", "OK"), events)
 
 
 if __name__ == "__main__":

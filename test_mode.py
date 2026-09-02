@@ -15,6 +15,9 @@ ROOT_GROUPS = (
     "MOTOR SETUP",
     "MODEL CONFIGURATION",
 )
+LED_TEST_MENU = "LED TEST"
+ROOT_MENU_ITEMS = (*ROOT_GROUPS, LED_TEST_MENU)
+LED_COUNT = 4
 
 SERIAL_COMMANDS = ("reset", "test_up", "test_down", "test_back")
 
@@ -161,6 +164,8 @@ class TestModeUI(CanvasUIFramework):
         self.level = "root"
         self.group_index = 0
         self.setting_index = 0
+        self.led_test_index = 0
+        self.led_states = [False] * LED_COUNT
         self.edit_setting = None
         self.edit_value = ""
         self.edit_choices = ()
@@ -220,11 +225,13 @@ class TestModeUI(CanvasUIFramework):
 
     def move_selection(self, direction):
         if self.level == "root":
-            self.group_index = (self.group_index + direction) % len(ROOT_GROUPS)
+            self.group_index = (self.group_index + direction) % len(ROOT_MENU_ITEMS)
         elif self.level == "group":
             settings = self.repository.groups[ROOT_GROUPS[self.group_index]]
             if settings:
                 self.setting_index = (self.setting_index + direction) % len(settings)
+        elif self.level == "led_test":
+            self.led_test_index = (self.led_test_index + direction) % LED_COUNT
         elif self.edit_choices:
             self.edit_choice_index = (self.edit_choice_index + direction) % len(self.edit_choices)
             self.edit_value = self.edit_choices[self.edit_choice_index]
@@ -236,8 +243,13 @@ class TestModeUI(CanvasUIFramework):
 
     def activate_selection(self):
         if self.level == "root":
-            self.level = "group"
-            self.setting_index = 0
+            if ROOT_MENU_ITEMS[self.group_index] == LED_TEST_MENU:
+                self.level = "led_test"
+                self.led_test_index = 0
+                self._turn_off_all_leds()
+            else:
+                self.level = "group"
+                self.setting_index = 0
         elif self.level == "group":
             settings = self.repository.groups[ROOT_GROUPS[self.group_index]]
             if not settings:
@@ -254,12 +266,14 @@ class TestModeUI(CanvasUIFramework):
                 self.edit_value = self.edit_choices[self.edit_choice_index]
             self.replace_edit_value = self.edit_setting.kind == "text" and not self.edit_choices
             self.level = "edit"
-        else:
+        elif self.level == "edit":
             self.repository.save(self.edit_setting, self.edit_value)
             self.serial_status = f"SAVED {self.edit_setting.label}"
             self.level = "group"
             self.edit_setting = None
             self.edit_choices = ()
+        else:
+            self._set_led(self.led_test_index, not self.led_states[self.led_test_index])
         self._build_scene()
 
     def go_back(self):
@@ -269,7 +283,40 @@ class TestModeUI(CanvasUIFramework):
             self.edit_choices = ()
         elif self.level == "group":
             self.level = "root"
+        elif self.level == "led_test":
+            self._turn_off_all_leds()
+            self.level = "root"
         self._build_scene()
+
+    def _set_led(self, index, enabled):
+        if self.serial is None:
+            self.serial_status = "ARDUINO NOT CONNECTED"
+            return False
+        try:
+            self.serial.set_switch_led(index + 1, enabled)
+        except Exception as error:
+            self.serial_status = f"LED COMMAND FAILED: {error}"
+            return False
+        self.led_states[index] = enabled
+        state = "ON" if enabled else "OFF"
+        self.serial_status = f"SW{index + 1} LED {state}"
+        return True
+
+    def _turn_off_all_leds(self):
+        for index in range(LED_COUNT):
+            if self.serial is not None:
+                try:
+                    self.serial.set_switch_led(index + 1, False)
+                except Exception as error:
+                    self.serial_status = f"LED COMMAND FAILED: {error}"
+                    break
+            self.led_states[index] = False
+
+    def close(self):
+        if not self.running:
+            return
+        self._turn_off_all_leds()
+        super().close()
 
     def _build_scene(self):
         if not self.running:
@@ -288,8 +335,10 @@ class TestModeUI(CanvasUIFramework):
             self._build_root_menu()
         elif self.level == "group":
             self._build_group_menu()
-        else:
+        elif self.level == "edit":
             self._build_edit_menu()
+        else:
+            self._build_led_test_menu()
 
     def _place_text(self, text, x, y, size=34, color=None, anchor="center", align="center"):
         photo = self._text_photo(
@@ -310,7 +359,7 @@ class TestModeUI(CanvasUIFramework):
         self._build_header(self.settings["title"])
         start_y = self.settings["menu_y"]
         spacing = self.settings["spacing"]
-        for index, group in enumerate(ROOT_GROUPS):
+        for index, group in enumerate(ROOT_MENU_ITEMS):
             color = self.settings["selected"] if index == self.group_index else self.settings["text"]
             self._place_text(group, 540, start_y + index * spacing, 32, color)
         self._place_text(self.settings["footer_root"], 540, 1815, 19)
@@ -358,6 +407,19 @@ class TestModeUI(CanvasUIFramework):
             instruction = "TYPE VALUE, BACKSPACE : DELETE, ENTER : SAVE, LEFT : CANCEL"
         self._place_text(instruction, 540, 1815, 19)
 
+    def _build_led_test_menu(self):
+        self._build_header("BUTTON LED TEST")
+        start_y = 650
+        spacing = 120
+        for index, enabled in enumerate(self.led_states):
+            selected = index == self.led_test_index
+            color = self.settings["selected"] if selected else self.settings["text"]
+            state = "ON" if enabled else "OFF"
+            state_color = self.settings["selected"] if enabled else self.settings["disabled"]
+            self._place_text(f"SW{index + 1} LED", 250, start_y + index * spacing, 32, color, anchor="w")
+            self._place_text(state, 830, start_y + index * spacing, 32, state_color, anchor="e")
+        self._place_text("UP / DOWN : SELECT, ENTER : TOGGLE, LEFT : ALL OFF + BACK", 540, 1815, 19)
+
     def _poll_events(self):
         if not self.running:
             return
@@ -367,6 +429,8 @@ class TestModeUI(CanvasUIFramework):
                 if event[0] == "serial":
                     self.attach_serial(event[1])
                     self.serial_status = "ARDUINO CONNECTED"
+                    if self.level == "led_test":
+                        self._turn_off_all_leds()
                 elif event[0] == "status":
                     self.serial_status = event[1]
                 self._build_scene()

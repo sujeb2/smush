@@ -8,9 +8,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import Image
 
 from game.rules import JUDGEMENT_WEIGHT
+from startup_health import check_disk, check_runtime_files, clear_previous_error
 
 
 PRELOAD_STAGES = (
+    ("DISK CHECK", "CHECK DISK..."),
+    ("FILE INTEGRITY", "CHECK APPLICATION FILES..."),
     ("GRAPHIC ASSETS", "LOAD ASSETS..."),
     ("ANIMATION CACHE", "LOAD ANIMATION CACHE..."),
     ("CHART MEDIA", "LOAD VIDOES..."),
@@ -94,6 +97,8 @@ class MinigamePreloadMixin:
         if status == "CHECKING":
             dots = "." * (self.preload_visual_tick % 4)
             return f"CHECKING{dots}", "#e5e9e6"
+        if status == "SKIPPED":
+            return "SKIPPED", "#87908b"
         return "----", "#68726c"
 
     def _animate_preload(self, now):
@@ -134,6 +139,11 @@ class MinigamePreloadMixin:
 
     def _run_preload(self):
         try:
+            self._run_preload_action("DISK CHECK", lambda: check_disk(self.base))
+            if self.recovery_startup:
+                self._run_preload_action("FILE INTEGRITY", lambda: check_runtime_files(self.base))
+            else:
+                self._post_preload_stage("FILE INTEGRITY", "SKIPPED")
             self._run_preload_action("GRAPHIC ASSETS", self._load_assets)
             actions = (
                 ("ANIMATION CACHE", self._preload_entry_animation_sources),
@@ -295,6 +305,8 @@ class MinigamePreloadMixin:
             self._set_preload_stage(next_stage, "CHECKING")
         elif message == "Initialization complete.":
             for name, _ in PRELOAD_STAGES:
+                if self.preload_stage_states.get(name) == "SKIPPED":
+                    continue
                 self._set_preload_stage(name, "OK")
             self.preload_active_stage = None
         self._print(message)
@@ -378,6 +390,8 @@ class MinigamePreloadMixin:
         self.preloaded_gameplay_scale = round(self.scale, 5)
         self.preload_render_tasks = []
         self._set_preload_stage("GAMEPLAY RENDERER", "OK")
+        clear_previous_error(self.base)
+        self.recovery_startup = False
         self.preload_complete = True
         elapsed = time.monotonic() - self.preload_started_at
         self._update_preload_status("Initialization complete.")

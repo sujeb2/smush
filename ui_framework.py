@@ -2,6 +2,8 @@ import glob
 import math
 import os
 import sys
+import textwrap
+import traceback
 import tkinter as tk
 
 from PIL import Image, ImageDraw, ImageFont, ImageTk
@@ -9,6 +11,42 @@ from PIL import Image, ImageDraw, ImageFont, ImageTk
 
 DESIGN_WIDTH = 1080
 DESIGN_HEIGHT = 1920
+UNRECOVERABLE_IMAGE_WIDTH = 900
+
+
+def load_svg_image(path):
+    """Rasterize an SVG through pygame's bundled SVG decoder for both renderers."""
+    os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
+    import pygame
+
+    surface = pygame.image.load(path)
+    return Image.frombytes("RGBA", surface.get_size(), pygame.image.tobytes(surface, "RGBA"))
+
+
+def enlarge_unrecoverable_image(source, target_width=UNRECOVERABLE_IMAGE_WIDTH):
+    scale = target_width / source.width
+    target_height = max(1, round(source.height * scale))
+    return source.resize((target_width, target_height), Image.Resampling.LANCZOS)
+
+
+def format_console_log(code, detail, width=72, max_lines=8):
+    lines = ["CONSOLE LOG", f"[{str(code).strip() or 'UNRECOVERABLE_ERROR'}]"]
+    detail_lines = []
+    for line in str(detail).strip().splitlines() or ("No additional details were provided.",):
+        detail_lines.extend(textwrap.wrap(line, width=width) or ("",))
+    available = max(1, max_lines - len(lines))
+    if len(detail_lines) > available:
+        detail_lines = ["...", *detail_lines[-(available - 1):]] if available > 1 else ["..."]
+    return "\n".join((*lines, *detail_lines))
+
+
+def persist_unrecoverable_error(base, code, detail):
+    try:
+        from startup_health import mark_unrecoverable_error
+
+        mark_unrecoverable_error(base, code, detail)
+    except Exception as error:
+        print(f"[startup health] cannot save unrecoverable-error marker: {error}", file=sys.stderr)
 
 
 def find_compiled_dir():
@@ -26,10 +64,14 @@ class CanvasUIFramework:
         self.offset_y = 0
         self.resize_job = None
         self.serial = None
+        self.unrecoverable_error = False
+        self.unrecoverable_code = ""
+        self.unrecoverable_detail = ""
         self.root = tk.Tk()
         self.root.title(title)
         self.root.configure(bg="black")
         self.root.protocol("WM_DELETE_WINDOW", self.close)
+        self.root.report_callback_exception = self._report_callback_exception
         if fullscreen:
             self.root.attributes("-fullscreen", True)
         else:
@@ -71,6 +113,9 @@ class CanvasUIFramework:
     def _schedule_scene(self, event):
         if event.width < 2 or event.height < 2:
             return
+        if self.unrecoverable_error:
+            self._draw_unrecoverable_error()
+            return
         if self.resize_job is not None:
             self.root.after_cancel(self.resize_job)
         self.resize_job = self.root.after(120, self._build_scene)
@@ -83,6 +128,53 @@ class CanvasUIFramework:
         self.offset_x = (width - DESIGN_WIDTH * self.scale) / 2
         self.offset_y = (height - DESIGN_HEIGHT * self.scale) / 2
         self.canvas.delete("all")
+
+    def _report_callback_exception(self, exception_type, exception, exception_traceback):
+        detail = "".join(traceback.format_exception(exception_type, exception, exception_traceback))
+        print(detail, file=sys.stderr, end="")
+        self.show_unrecoverable_error(exception_type.__name__.upper(), detail)
+
+    def show_unrecoverable_error(self, code, detail):
+        """Stop the active UI and replace it with the application fatal-error screen."""
+        if not self.running:
+            return
+        self.unrecoverable_error = True
+        self.unrecoverable_code = str(code)
+        self.unrecoverable_detail = str(detail)
+        persist_unrecoverable_error(self.base, code, detail)
+        try:
+            for job in self.root.tk.call("after", "info"):
+                self.root.after_cancel(job)
+        except tk.TclError:
+            pass
+        self.resize_job = None
+        self._draw_unrecoverable_error()
+
+    def _draw_unrecoverable_error(self):
+        self._prepare_scene()
+        self.canvas.create_rectangle(
+            self._x(0), self._y(0), self._x(DESIGN_WIDTH), self._y(DESIGN_HEIGHT),
+            fill="black", outline="", tags="unrecoverable_error",
+        )
+        source = enlarge_unrecoverable_image(
+            load_svg_image(os.path.join(self.base, "files", "img", "unrecoverable_system_error.svg")),
+        )
+        self.unrecoverable_error_photo = self._scaled_photo(source)
+        self.unrecoverable_console_photo = self._text_photo(
+            format_console_log(self.unrecoverable_code, self.unrecoverable_detail),
+            25,
+            font_path=self.novecento_font_path,
+            align="left",
+        )
+        self.canvas.create_image(
+            self._x(DESIGN_WIDTH / 2), self._y(DESIGN_HEIGHT / 2),
+            image=self.unrecoverable_error_photo, anchor="center", tags="unrecoverable_error",
+        )
+        self.canvas.create_image(
+            self._x(72), self._y(1510), image=self.unrecoverable_console_photo,
+            anchor="nw", tags="unrecoverable_error",
+        )
+        self.canvas.tag_raise("unrecoverable_error")
 
     def _find_font(self, patterns, extra_directories=()):
         directories = (os.path.join(self.base, "files", "fonts"), *extra_directories)
@@ -126,3 +218,9 @@ class CanvasUIFramework:
 
     def _y(self, value):
         return self.offset_y + value * self.scale
+
+
+class UnrecoverableErrorUI(CanvasUIFramework):
+    def __init__(self, code, detail, fullscreen=True):
+        super().__init__("SMUSH ERROR", fullscreen=fullscreen)
+        self.root.after(0, lambda: self.show_unrecoverable_error(code, detail))

@@ -413,10 +413,12 @@ class MinigameAnimationMixin:
             self.title_entry_morph_started = None
 
     def _animate(self):
-        if not self.running:
+        if not self.running or self.unrecoverable_error:
             return
         now = time.monotonic()
         self._poll_events()
+        if self.unrecoverable_error:
+            return
         if self.scene != "game":
             self._animate_common(now)
         if self.loading_phase is not None:
@@ -513,14 +515,22 @@ class MinigameAnimationMixin:
         self.serial_buffer = self.serial_buffer[-256:]
 
     def _poll_events(self):
+        if self.unrecoverable_error:
+            return
         try:
             while True:
                 event = self.event_queue.get_nowait()
                 if event[0] == "serial":
                     self.attach_serial(event[1])
+                    self.serial_connection_failed = False
+                    if self.serial_failure_item is not None:
+                        self.canvas.delete(self.serial_failure_item)
+                        self.serial_failure_item = None
                     self._print("serial input ready")
                 elif event[0] == "status":
                     self._print(event[1])
+                elif event[0] == "serial_failure":
+                    self._mark_serial_failed(event[1])
                 elif event[0] == "preload_status":
                     self._update_preload_status(event[1])
                 elif event[0] == "preload_stage":
@@ -528,9 +538,21 @@ class MinigameAnimationMixin:
                 elif event[0] == "preload_ready":
                     self._finish_preload()
                 elif event[0] == "preload_error":
-                    self._fail_preload(event[1])
+                    self.show_unrecoverable_error("MINIGAME_PRELOAD_FAILED", event[1])
         except queue.Empty:
             pass
+
+    def _show_serial_failure(self):
+        if self.scene != "title" or self.serial_failure_item is not None:
+            return
+        self.serial_failure_item = self._image(
+            "fail_io", 540, 1445, tags=("title", "serial_failure"),
+        )
+
+    def _mark_serial_failed(self, detail):
+        self.serial_connection_failed = True
+        self._print(f"serial connection failed: {detail}")
+        self._show_serial_failure()
 
     def _poll_serial(self):
         if not self.running:
@@ -544,11 +566,12 @@ class MinigameAnimationMixin:
                 if self.serial_buffer and time.monotonic() - self.serial_buffer_updated_at >= 0.05:
                     self._drain_serial_buffer(force=True)
             except Exception as error:
-                self._print(f"serial read failed: {error}")
                 failed_serial = self.serial
                 self.serial = None
                 try:
                     failed_serial.close()
                 except Exception:
                     pass
-        self.root.after(25, self._poll_serial)
+                self._mark_serial_failed(error)
+        if not self.unrecoverable_error:
+            self.root.after(25, self._poll_serial)

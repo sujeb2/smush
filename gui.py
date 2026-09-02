@@ -4,7 +4,6 @@ import math
 import os
 import queue
 import random
-import textwrap
 import threading
 import time
 from collections import deque
@@ -61,7 +60,6 @@ class RecyclingUI(CanvasUIFramework):
         self.ground_source = Image.open(os.path.join(self.base, "files", "img", "ground_layer.png")).convert("RGBA")
         self.trash_source = Image.open(os.path.join(self.base, "files", "img", "trash_can.png")).convert("RGBA")
         self.cans_source = Image.open(os.path.join(self.base, "files", "img", "cans.png")).convert("RGBA")
-        self.error_source = Image.open(os.path.join(self.base, "files", "img", "error_layer.png")).convert("RGBA")
         self.update_source = Image.open(os.path.join(self.base, "files", "img", "update_layer.png")).convert("RGBA")
         self.drop_sources = {
             "can": Image.open(os.path.join(self.base, "files", "img", "can.png")).convert("RGBA"),
@@ -119,14 +117,14 @@ class RecyclingUI(CanvasUIFramework):
         self._build_scene()
 
     def show_error(self, code, detail):
-        if self.screen_state == "error":
+        if self.unrecoverable_error:
             return
         self.screen_state = "error"
         self.error_code = code
-        self.error_detail = "\n".join(textwrap.fill(line, width=58) for line in detail.splitlines())
+        self.error_detail = detail
         self.animating = False
         self.pending_events.clear()
-        self._build_scene()
+        self.show_unrecoverable_error(code, detail)
 
     def trigger_recycle(self, material="can"):
         if not self.running or self.screen_state != "ready":
@@ -226,15 +224,7 @@ class RecyclingUI(CanvasUIFramework):
         self.canvas.create_image(self._x(598), self._y(1200), image=self.update_percent_photo, anchor="n", tags="update")
 
     def _build_error_scene(self):
-        self.error_photo = self._scaled_photo(self.error_source)
-        self.canvas.create_image(self._x(540), self._y(0), image=self.error_photo, anchor="n", tags="error")
-        self.error_title_photo = self._text_photo("ERROR CODE:", 46, font_path=self.novecento_font_path)
-        self.error_code_photo = self._text_photo(self.error_code, 34, font_path=self.display_font_path)
-        self.error_detail_photo = self._text_photo(self.error_detail, 25, font_path=self.novecento_font_path)
-        self.canvas.create_image(self._x(540), self._y(885), image=self.error_title_photo, anchor="n", tags="error")
-        self.canvas.create_image(self._x(540), self._y(955), image=self.error_code_photo, anchor="n", tags="error")
-        self.canvas.create_image(self._x(540), self._y(1020), image=self.error_detail_photo, anchor="n", tags="error")
-        self.canvas.tag_raise("error")
+        self._draw_unrecoverable_error()
 
     def _make_drop_photos(self, source):
         photos = []
@@ -380,6 +370,8 @@ class RecyclingUI(CanvasUIFramework):
                     self.show_error(event[1].upper(), event[2].upper())
         except queue.Empty:
             pass
+        if self.unrecoverable_error:
+            return
         self.root.after(50, self._poll_events)
 
     def _consume_serial_messages(self, message):
@@ -434,7 +426,8 @@ class RecyclingUI(CanvasUIFramework):
                 except Exception:
                     pass
                 self.show_error("ARDUINO_CONNECTION_LOST", "CANNOT COMMUNICATE WITH ARDUINO.\nCHECK USB CABLE AND RESTART THE PROGRAM.")
-        self.root.after(50, self._poll_serial)
+        if not self.unrecoverable_error:
+            self.root.after(50, self._poll_serial)
 
     def _save_count(self):
         if self.count_file is None:

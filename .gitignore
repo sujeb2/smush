@@ -177,6 +177,7 @@ dmypy.json
 .pyre/
 files/captures/
 game/minigame_progress.json
+files/.last_unrecoverable_error.json
 
 # pytype static type analyzer
 .pytype/

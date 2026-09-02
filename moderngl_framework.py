@@ -2,7 +2,9 @@ import glob
 import heapq
 import math
 import os
+import sys
 import time
+import traceback
 import weakref
 from array import array
 from dataclasses import dataclass, field
@@ -10,7 +12,15 @@ from types import SimpleNamespace
 
 from PIL import Image, ImageColor, ImageDraw, ImageFont
 
-from ui_framework import DESIGN_HEIGHT, DESIGN_WIDTH, find_compiled_dir
+from ui_framework import (
+    DESIGN_HEIGHT,
+    DESIGN_WIDTH,
+    enlarge_unrecoverable_image,
+    find_compiled_dir,
+    format_console_log,
+    load_svg_image,
+    persist_unrecoverable_error,
+)
 
 
 _VERTEX_SHADER = """
@@ -365,6 +375,10 @@ class PygameRoot:
     def after_cancel(self, job):
         self.cancelled.add(job)
 
+    def cancel_all_jobs(self):
+        self.jobs.clear()
+        self.cancelled.clear()
+
     def destroy(self):
         self.framework.running = False
 
@@ -418,29 +432,34 @@ class PygameRoot:
         fps_counter = self.framework.fps_counter
         try:
             while self.framework.running:
-                for event in self.pygame.event.get():
-                    if event.type == self.pygame.QUIT:
-                        self.framework.close()
-                    elif event.type == self.pygame.KEYDOWN:
-                        keysym = self._keysym(self.pygame, event)
-                        if keysym == "Escape":
-                            callback = self.bindings.get("<Escape>")
+                try:
+                    for event in self.pygame.event.get():
+                        if event.type == self.pygame.QUIT:
+                            self.framework.close()
+                        elif event.type == self.pygame.KEYDOWN:
+                            keysym = self._keysym(self.pygame, event)
+                            if keysym == "Escape":
+                                callback = self.bindings.get("<Escape>")
+                                if callback is not None:
+                                    callback(SimpleNamespace(keysym=keysym))
+                                continue
+                            callback = self.bindings.get("<KeyPress>")
                             if callback is not None:
                                 callback(SimpleNamespace(keysym=keysym))
-                            continue
-                        callback = self.bindings.get("<KeyPress>")
-                        if callback is not None:
-                            callback(SimpleNamespace(keysym=keysym))
-                self._run_jobs()
-                if not self.framework.running:
-                    break
-                self.framework.canvas.render()
-                self.pygame.display.flip()
-                if fps_counter.update():
-                    self.framework.canvas.update_fps_overlay(
-                        fps_counter.text(), self.framework.novecento_demibold_font_path,
-                    )
-                clock.tick(60)
+                    self._run_jobs()
+                    if not self.framework.running:
+                        break
+                    self.framework.canvas.render()
+                    self.pygame.display.flip()
+                    if fps_counter.update() and not self.framework.unrecoverable_error:
+                        self.framework.canvas.update_fps_overlay(
+                            fps_counter.text(), self.framework.novecento_demibold_font_path,
+                        )
+                    clock.tick(60)
+                except Exception as error:
+                    detail = traceback.format_exc()
+                    print(detail, file=sys.stderr, end="")
+                    self.framework.show_unrecoverable_error(type(error).__name__.upper(), detail)
         finally:
             self.framework._shutdown_display()
 
@@ -461,6 +480,9 @@ class ModernGLUIFramework:
         self.offset_y = 0.0
         self.resize_job = None
         self.serial = None
+        self.unrecoverable_error = False
+        self.unrecoverable_code = ""
+        self.unrecoverable_detail = ""
         self.pygame = pygame
         self.moderngl = moderngl
         self.fps_counter = FrameRateCounter()
@@ -529,6 +551,42 @@ class ModernGLUIFramework:
 
     def attach_serial(self, serial_io):
         self.serial = serial_io
+
+    def show_unrecoverable_error(self, code, detail):
+        """Stop all scene callbacks and leave only the fatal-error UI active."""
+        if not self.running:
+            return
+        self.unrecoverable_error = True
+        self.unrecoverable_code = str(code)
+        self.unrecoverable_detail = str(detail)
+        persist_unrecoverable_error(self.base, code, detail)
+        self.root.cancel_all_jobs()
+        self.canvas.fps_overlay = None
+        self._draw_unrecoverable_error()
+
+    def _draw_unrecoverable_error(self):
+        self._prepare_scene()
+        self.canvas.create_rectangle(
+            self._x(0), self._y(0), self._x(DESIGN_WIDTH), self._y(DESIGN_HEIGHT),
+            fill="black", outline="", tags=("unrecoverable_error",),
+        )
+        source = enlarge_unrecoverable_image(
+            load_svg_image(os.path.join(self.base, "files", "img", "unrecoverable_system_error.svg")),
+        )
+        console = self._text_photo(
+            format_console_log(self.unrecoverable_code, self.unrecoverable_detail),
+            25,
+            font_path=self.novecento_font_path,
+            align="left",
+        )
+        self.canvas.create_image(
+            self._x(DESIGN_WIDTH / 2), self._y(DESIGN_HEIGHT / 2),
+            image=source, anchor="center", tags=("unrecoverable_error",),
+        )
+        self.canvas.create_image(
+            self._x(72), self._y(1510), image=console,
+            anchor="nw", tags=("unrecoverable_error",),
+        )
 
     def _prepare_scene(self):
         self.resize_job = None

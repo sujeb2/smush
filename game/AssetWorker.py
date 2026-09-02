@@ -18,6 +18,7 @@ IMAGE_PATHS = {
     "epilepsywarning": ("generic", "epilepsywarning.png"),
     "notice": ("generic", "notice.png"),
     "thanksforplaying": ("generic", "thanksforplaying.png"),
+    "fail_io": ("generic", "fail_io.png"),
     "demonstration_able": ("generic", "demonstration_abletostart.png"),
     "demonstration_coin": ("generic", "demonstration_insertcoin.png"),
     "select_bg": ("music_select", "select_music_bg.png"),

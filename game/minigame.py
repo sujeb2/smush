@@ -38,6 +38,7 @@ from game.result_scene import MinigameResultSceneMixin
 from game.scenemanager import MinigameSceneMixin
 from game.state import MinigameStateMixin
 from game.osu_chart import discover_osu_supported
+from startup_health import clear_previous_error, previous_error_details
 from ui_framework import find_compiled_dir
 from moderngl_framework import ModernGLUIFramework
 
@@ -78,6 +79,7 @@ class MinigameUI(
             earned, self.coin_count = divmod(self.coin_count, self.coins_per_credit)
             self.credit_count += earned
         self._initialize_state()
+        self.recovery_startup = previous_error_details(self.base) is not None
         self.audio = AudioPlayer()
         self.root.bind("<KeyPress>", self._handle_key)
         self.root.after(0, self.show_preload)
@@ -120,6 +122,17 @@ class MinigameUI(
 
     def post_status(self, status):
         self.event_queue.put(("status", status))
+
+    def post_serial_failure(self, detail):
+        self.event_queue.put(("serial_failure", str(detail)))
+
+    def show_unrecoverable_error(self, code, detail):
+        if self.unrecoverable_error:
+            return
+        self._close_select_video()
+        self._close_game_video()
+        self.audio.stop()
+        super().show_unrecoverable_error(code, detail)
 
     def close(self):
         self._close_select_video()

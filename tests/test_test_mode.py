@@ -2,7 +2,15 @@ import os
 import tempfile
 import unittest
 
-from test_mode import ConfigRepository, setting_kind, split_serial_commands, update_config_value
+from test_mode import (
+    LED_TEST_MENU,
+    ROOT_MENU_ITEMS,
+    ConfigRepository,
+    TestModeUI,
+    setting_kind,
+    split_serial_commands,
+    update_config_value,
+)
 
 
 class SerialCommandTests(unittest.TestCase):
@@ -73,6 +81,61 @@ class SettingKindTests(unittest.TestCase):
         self.assertEqual(setting_kind("-12"), "integer")
         self.assertEqual(setting_kind("0.25"), "float")
         self.assertEqual(setting_kind("files/model.pt"), "text")
+
+
+class FakeSerial:
+    def __init__(self):
+        self.led_commands = []
+
+    def set_switch_led(self, switch_number, enabled):
+        self.led_commands.append((switch_number, enabled))
+
+
+class LedTestMenuTests(unittest.TestCase):
+    def setUp(self):
+        self.ui = TestModeUI.__new__(TestModeUI)
+        self.ui.level = "root"
+        self.ui.group_index = ROOT_MENU_ITEMS.index(LED_TEST_MENU)
+        self.ui.setting_index = 0
+        self.ui.led_test_index = 0
+        self.ui.led_states = [False] * 4
+        self.ui.edit_choices = ()
+        self.ui.edit_setting = None
+        self.ui.serial_status = "ARDUINO CONNECTED"
+        self.ui.serial = FakeSerial()
+        self.ui._build_scene = lambda: None
+
+    def test_root_menu_opens_led_test_and_resets_all_leds(self):
+        self.ui.activate_selection()
+
+        self.assertEqual(self.ui.level, "led_test")
+        self.assertEqual(
+            self.ui.serial.led_commands,
+            [(1, False), (2, False), (3, False), (4, False)],
+        )
+
+    def test_enter_toggles_selected_led(self):
+        self.ui.level = "led_test"
+        self.ui.led_test_index = 2
+
+        self.ui.activate_selection()
+        self.ui.activate_selection()
+
+        self.assertEqual(self.ui.serial.led_commands, [(3, True), (3, False)])
+        self.assertFalse(self.ui.led_states[2])
+
+    def test_leaving_led_test_turns_every_led_off(self):
+        self.ui.level = "led_test"
+        self.ui.led_states = [True] * 4
+
+        self.ui.go_back()
+
+        self.assertEqual(self.ui.level, "root")
+        self.assertEqual(self.ui.led_states, [False] * 4)
+        self.assertEqual(
+            self.ui.serial.led_commands,
+            [(1, False), (2, False), (3, False), (4, False)],
+        )
 
 
 if __name__ == "__main__":
