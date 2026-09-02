@@ -551,7 +551,7 @@ class MinigameAnimationMixin:
 
     def _mark_serial_failed(self, detail):
         self.serial_connection_failed = True
-        self._print(f"serial connection failed: {detail}")
+        self._print(f"[SerialIO] serial connection failed: {detail}")
         self._show_serial_failure()
 
     def _poll_serial(self):
