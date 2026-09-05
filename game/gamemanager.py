@@ -17,6 +17,32 @@ from game.rules import (
 
 
 class MinigameGameplayMixin:
+    def _autoplay_active(self):
+        return self.scene == "demonstration" or getattr(self, "debug_autoplay", False)
+
+    def _autoplay_mania_notes(self, elapsed):
+        if not self._autoplay_active():
+            return
+        for index, note in enumerate(self.track.notes):
+            if index not in self.resolved_notes and elapsed >= note.time:
+                self._trigger_lane_help(note.lane)
+                self._resolve_note(index, "perfect")
+
+    def _update_autoplay_catcher(self, now):
+        if not self._autoplay_active():
+            self._animate_catcher(now)
+            return
+        next_note = next(
+            (note for index, note in enumerate(self.track.notes) if index not in self.resolved_notes),
+            None,
+        )
+        if next_note is not None:
+            self.catcher_x = 90.0 + next_note.x / 512.0 * 900.0
+        self.catcher_velocity = 0.0
+        self.catcher_last_update = now
+        if self.catcher_item is not None:
+            self.canvas.coords(self.catcher_item, self._x(self.catcher_x), self._y(1725))
+
     def _scroll_lead_time(self, base_seconds):
         return base_seconds / self.settings.get("scroll_speed", 1.30)
 
@@ -355,7 +381,8 @@ class MinigameGameplayMixin:
         if self.scene not in ("game", "demonstration") or self.game_started is None:
             return
         elapsed = self._game_elapsed()
-        self._animate_catcher(now)
+        self._update_autoplay_catcher(now)
+        autoplay = self._autoplay_active()
         lead_time = self._scroll_lead_time(1.65)
         start_y = 520.0
         catch_y = 1625.0
@@ -366,7 +393,8 @@ class MinigameGameplayMixin:
             target_x = 90.0 + note.x / 512.0 * 900.0
             time_until = note.time - elapsed
             if time_until <= 0:
-                self._resolve_catch(index, abs(target_x - self.catcher_x) <= catcher_half_width)
+                caught = autoplay or abs(target_x - self.catcher_x) <= catcher_half_width
+                self._resolve_catch(index, caught)
                 continue
             if time_until <= lead_time:
                 y = catch_y - time_until / lead_time * (catch_y - start_y)
@@ -385,10 +413,16 @@ class MinigameGameplayMixin:
         self._animate_catch_combo(now)
         self._animate_catch_bursts(now)
         self._animate_health(now)
-        if not self.game_finishing and (self.health <= 0 or elapsed >= self.track.duration + 1.2):
+        demonstration_finished = self.scene == "demonstration" and elapsed >= self.demonstration_end_time
+        gameplay_finished = self.scene == "game" and (self.health <= 0 or elapsed >= self.track.duration + 1.2)
+        if not self.game_finishing and (demonstration_finished or gameplay_finished):
             self.game_finishing = True
             self.audio.stop(180)
-            self._start_loading("result", self.show_result)
+            if self.scene == "demonstration":
+                target = "demonstration" if self.demonstration_queue else "ci"
+                self._start_loading(target, self._complete_demonstration)
+            else:
+                self._start_loading("result", self.show_result)
 
     def _update_game_frame(self, now):
         if self.scene not in ("game", "demonstration") or self.game_started is None:
@@ -398,12 +432,8 @@ class MinigameGameplayMixin:
             return
         elapsed = self._game_elapsed()
         self._update_hold_ticks(elapsed)
-        if self.scene == "demonstration":
-            for index, note in enumerate(self.track.notes):
-                if index not in self.resolved_notes and elapsed >= note.time:
-                    self._trigger_lane_help(note.lane)
-                    self._resolve_note(index, "perfect")
-        else:
+        self._autoplay_mania_notes(elapsed)
+        if not self._autoplay_active():
             for index, note in enumerate(self.track.notes):
                 if index not in self.resolved_notes and elapsed > note.time + BAD_WINDOW:
                     self._resolve_note(index, "miss")
@@ -468,6 +498,7 @@ class MinigameGameplayMixin:
             self.game_finishing = True
             self.audio.stop(180)
             if self.scene == "demonstration":
-                self._start_loading("ci", self._complete_demonstration)
+                target = "demonstration" if self.demonstration_queue else "ci"
+                self._start_loading(target, self._complete_demonstration)
             else:
                 self._start_loading("result", self.show_result)

@@ -35,6 +35,9 @@ class MinigameFlowMixin:
         self._print(f"coin accepted: {self._credit_status_text()}")
 
     def _handle_key(self, event):
+        if event.keysym in ("F8", "f8"):
+            self._toggle_debug_autoplay()
+            return
         if event.keysym in ("minus", "KP_Subtract", "-"):
             self._open_debug_test_mode()
             return
@@ -59,6 +62,11 @@ class MinigameFlowMixin:
             return
         self._print("debug key received, opening original test mode UI")
         self.test_mode_callback()
+
+    def _toggle_debug_autoplay(self):
+        self.debug_autoplay = not self.debug_autoplay
+        status = "enabled" if self.debug_autoplay else "disabled"
+        self._print(f"debug autoplay {status}")
 
     def press_button(self, lane):
         if (
@@ -229,7 +237,7 @@ class MinigameFlowMixin:
             self._x(540), self._y(1120), image=self.warning_frames[0], anchor="center", tags=("warning_mode_morph",),
         )
         self.canvas.tag_raise(self.warning_item)
-        self._print("warning to mode select morph started")
+        self._print("[AnimationManager] warning to mode select morph started")
 
     def _cycle_selection(self):
         self._play_sfx("cursor_select.wav")
@@ -305,7 +313,7 @@ class MinigameFlowMixin:
             self._create_fade_overlay(1.0)
             self.title_fade_started = self.scene_started
         self.root.after(80, self._play_title_audio)
-        self._print(f"title visible, mode: {self.settings['mode']}, track: {self._track_key()}")
+        self._print(f"[AnimationManager] title visible, mode: {self.settings['mode']}, track: {self._track_key()}")
 
     def _play_title_audio(self):
         if not self.running or self.scene != "title":
@@ -343,7 +351,7 @@ class MinigameFlowMixin:
         self.entry_deadline = self.scene_started + 20.0
         self.root.after(80, self._play_entry_audio)
         self.root.after(140, lambda: self._play_sfx("card_show.wav") if self.scene == "entry" else None)
-        self._print("entry visible, guest play only")
+        self._print("[AnimationManager] entry visible, guest play only")
 
     def _start_title_entry_morph(self):
         if self.scene != "title" or self.title_entry_morph_started is not None:
@@ -370,7 +378,7 @@ class MinigameFlowMixin:
         )
         self.title_entry_morph_started = time.monotonic()
         self.canvas.tag_raise(self.title_entry_logo_item)
-        self._print("title to entry logo morph started")
+        self._print("[AnimationManager] title to entry logo morph started")
 
     def _show_entry_choice(self, choice):
         if self.scene != "entry" or self.entry_choice is not None:
@@ -387,7 +395,7 @@ class MinigameFlowMixin:
         self.canvas.tag_raise(self.entry_card_item)
         self._play_sfx("ok.wav")
         self._play_sfx("card_show.wav")
-        self._print(f"entry {choice} selected, confirmation: 3 seconds")
+        self._print(f"[AnimationManager] entry {choice} selected, confirmation: 3 seconds")
 
     def _play_entry_audio(self):
         if self.running and self.scene in ("entry", "warning"):
@@ -399,7 +407,7 @@ class MinigameFlowMixin:
         self.entry_title_fade_started = time.monotonic()
         self.audio.stop(650)
         self._create_fade_overlay(0.0)
-        self._print("entry to title intermission fade started")
+        self._print("[AnimationManager] entry to title intermission fade started")
 
     def show_warning(self):
         if self.scene != "entry":
@@ -409,7 +417,7 @@ class MinigameFlowMixin:
         self.scene_started = time.monotonic()
         self.warning_deadline = self.scene_started + 3.0
         self.root.after(120, lambda: self._play_sfx("card_show.wav") if self.scene == "warning" else None)
-        self._print("warning visible, duration: 3 seconds")
+        self._print("[AnimationManager] warning visible, duration: 3 seconds")
 
     def show_mode_select(self):
         self.scene = "mode_select"
@@ -447,7 +455,7 @@ class MinigameFlowMixin:
         self.select_deadline = time.monotonic() + self.settings["select_seconds"]
         self._build_scene()
         self.scene_started = time.monotonic()
-        self._print("title to music select morph started")
+        self._print("[AnimationManager] title to music select morph started")
 
     def show_next(self):
         self.scene = "next"
@@ -518,7 +526,7 @@ class MinigameFlowMixin:
         self.loading_phase = "fading_out"
         self.loading_started = time.monotonic()
         self._create_fade_overlay(0.0)
-        self._print(f"fade transition started: {self.scene} to {target}")
+        self._print(f"[AnimationManager] fade transition started: {self.scene} to {target}")
 
     def _animate_loading_transition(self, now):
         if self.loading_phase == "fading_out":
@@ -597,27 +605,36 @@ class MinigameFlowMixin:
         delay = round(pre_roll * 1000)
         self.game_audio_job = self.root.after(delay, self._start_chart_audio)
 
-    def _demonstration_candidates(self):
+    def _demonstration_candidates(self, mode=None):
         excluded = {"testchart", "sample-chart"}
+        modes = (mode,) if mode is not None else ("2k", "4k", "catch")
         return tuple(
-            chart for chart in self.charts_by_mode["2k"]
+            chart
+            for candidate_mode in modes
+            for chart in self.charts_by_mode.get(candidate_mode, ())
             if os.path.basename(chart.folder).casefold() not in excluded
         )
 
     def show_demonstration(self):
-        candidates = self._demonstration_candidates()
-        if not candidates:
+        self.demonstration_queue = [
+            (mode, random.choice(candidates))
+            for mode in ("2k", "4k", "catch")
+            if (candidates := self._demonstration_candidates(mode))
+        ]
+        if not self.demonstration_queue:
             self.show_ci()
             return
         self.demonstration_restore_state = self.game_mode, self.track
-        self.game_mode = "2k"
-        self.track = random.choice(candidates)
+        self._show_next_demonstration()
+
+    def _show_next_demonstration(self):
+        self.game_mode, self.track = self.demonstration_queue.pop(0)
         first_note_time = self.track.notes[0].time if self.track.notes else 0.0
         start_time = max(0.0, first_note_time - 1.5)
         self.demonstration_end_time = min(self.track.duration + 0.8, start_time + 18.0)
         self._open_gameplay_scene("demonstration", 1.0, start_time)
         self._print(
-            f"demonstration visible, chart: {os.path.basename(self.track.path)}, "
+            f"{self.game_mode.upper()} demonstration visible, chart: {os.path.basename(self.track.path)}, "
             f"start: {start_time:.2f}s"
         )
 
@@ -626,12 +643,16 @@ class MinigameFlowMixin:
             return
         self.game_mode, self.track = self.demonstration_restore_state
         self.demonstration_restore_state = None
+        self.demonstration_queue = []
 
     def _complete_demonstration(self):
         if self.game_audio_job is not None:
             self.root.after_cancel(self.game_audio_job)
             self.game_audio_job = None
         self.audio.stop(180)
+        if self.demonstration_queue:
+            self._show_next_demonstration()
+            return
         self._restore_demonstration_state()
         self.show_ci()
 

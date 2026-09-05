@@ -15,7 +15,6 @@ UNRECOVERABLE_IMAGE_WIDTH = 900
 
 
 def load_svg_image(path):
-    """Rasterize an SVG through pygame's bundled SVG decoder for both renderers."""
     os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
     import pygame
 
@@ -135,7 +134,6 @@ class CanvasUIFramework:
         self.show_unrecoverable_error(exception_type.__name__.upper(), detail)
 
     def show_unrecoverable_error(self, code, detail):
-        """Stop the active UI and replace it with the application fatal-error screen."""
         if not self.running:
             return
         self.unrecoverable_error = True
@@ -148,6 +146,7 @@ class CanvasUIFramework:
         except tk.TclError:
             pass
         self.resize_job = None
+        print(f"ERROR HAS OCCURRED!!\nCode: {code}\nDetail: {detail}")
         self._draw_unrecoverable_error()
 
     def _draw_unrecoverable_error(self):

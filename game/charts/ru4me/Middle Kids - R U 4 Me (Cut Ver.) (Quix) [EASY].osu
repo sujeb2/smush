@@ -34,7 +34,7 @@ BeatmapSetID: 2310162
 [Difficulty]
 HPDrainRate: 2
 CircleSize: 3
-OverallDifficulty: 6.2
+OverallDifficulty: 6
 ApproachRate: 6.2
 SliderMultiplier: 0.9
 SliderTickRate: 0.5

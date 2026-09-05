@@ -35,7 +35,7 @@ BeatmapSetID: 1982063
 [Difficulty]
 HPDrainRate: 3
 CircleSize: 3
-OverallDifficulty: 7
+OverallDifficulty: 5
 ApproachRate: 7
 SliderMultiplier: 1.3
 SliderTickRate: 1

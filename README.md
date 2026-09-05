@@ -11,3 +11,7 @@
 - 1920x1080 FHD 24inch screen
 - Any step motor that can do 50kg/cm torque
 - 2 mini type conveyor
+
+## minigame debug controls
+- `F8`: toggle autoplay for 2K, 4K, and catch gameplay.
+- `-`: open the original test-mode interface.

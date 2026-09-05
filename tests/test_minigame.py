@@ -447,6 +447,65 @@ class SelectionTests(unittest.TestCase):
 
 
 class RefactorTests(unittest.TestCase):
+    def test_f8_toggles_debug_autoplay_for_every_mode(self):
+        messages = []
+        game = MinigameUI.__new__(MinigameUI)
+        game.debug_autoplay = False
+        game._print = messages.append
+        game._handle_key(SimpleNamespace(keysym="F8"))
+        self.assertTrue(game.debug_autoplay)
+        game._handle_key(SimpleNamespace(keysym="f8"))
+        self.assertFalse(game.debug_autoplay)
+        self.assertEqual(
+            messages,
+            [
+                "debug autoplay enabled for 2K, 4K, and catch",
+                "debug autoplay disabled for 2K, 4K, and catch",
+            ],
+        )
+
+    def test_debug_autoplay_hits_notes_in_2k_and_4k(self):
+        for mode, lanes in (("2k", (0, 1)), ("4k", (0, 3))):
+            with self.subTest(mode=mode):
+                hits = []
+                game = MinigameUI.__new__(MinigameUI)
+                game.scene = "game"
+                game.game_mode = mode
+                game.debug_autoplay = True
+                game.track = SimpleNamespace(
+                    notes=tuple(ChartNote(1.0, lane) for lane in lanes),
+                )
+                game.resolved_notes = set()
+                game._trigger_lane_help = lambda lane: hits.append(("lane", lane))
+                game._resolve_note = lambda index, judgement: (
+                    game.resolved_notes.add(index), hits.append((judgement, index))
+                )
+                game._autoplay_mania_notes(1.0)
+                self.assertEqual(
+                    hits,
+                    [item for lane in lanes for item in (("lane", lane), ("perfect", lanes.index(lane)))],
+                )
+
+    def test_debug_autoplay_positions_catcher_for_catch_mode(self):
+        positions = []
+        game = MinigameUI.__new__(MinigameUI)
+        game.scene = "game"
+        game.game_mode = "catch"
+        game.debug_autoplay = True
+        game.track = SimpleNamespace(notes=(ChartNote(1.0, 0, x=448.0),))
+        game.resolved_notes = set()
+        game.catcher_x = 540.0
+        game.catcher_velocity = 120.0
+        game.catcher_last_update = None
+        game.catcher_item = 1
+        game.canvas = SimpleNamespace(coords=lambda *args: positions.append(args))
+        game._x = lambda value: value
+        game._y = lambda value: value
+        game._update_autoplay_catcher(2.0)
+        self.assertEqual(game.catcher_x, 877.5)
+        self.assertEqual(game.catcher_velocity, 0.0)
+        self.assertEqual(positions[-1], (1, 877.5, 1725))
+
     def test_attract_title_routes_to_demonstration(self):
         transitions = []
         game = MinigameUI.__new__(MinigameUI)
@@ -490,6 +549,39 @@ class RefactorTests(unittest.TestCase):
             [chart.folder for chart in game._demonstration_candidates()],
             ["/charts/music"],
         )
+
+    def test_demonstration_shows_each_available_game_mode(self):
+        def chart(name):
+            return SimpleNamespace(
+                folder=f"/charts/{name}", path=f"/{name}.osu",
+                notes=(ChartNote(2.0, 0),), duration=12.0,
+            )
+
+        original_track = chart("original")
+        opened = []
+        ci_scenes = []
+        game = MinigameUI.__new__(MinigameUI)
+        game.game_mode = "2k"
+        game.track = original_track
+        game.charts_by_mode = {
+            "2k": (chart("two"),),
+            "4k": (chart("four"),),
+            "catch": (chart("catch"),),
+        }
+        game.game_audio_job = None
+        game.audio = SimpleNamespace(stop=lambda *args: None)
+        game._print = lambda message: None
+        game._open_gameplay_scene = lambda scene, pre_roll, offset: opened.append(game.game_mode)
+        game.show_ci = lambda: ci_scenes.append(True)
+
+        game.show_demonstration()
+        game._complete_demonstration()
+        game._complete_demonstration()
+        game._complete_demonstration()
+
+        self.assertEqual(opened, ["2k", "4k", "catch"])
+        self.assertEqual(ci_scenes, [True])
+        self.assertEqual((game.game_mode, game.track), ("2k", original_track))
 
     def test_lane_help_and_demonstration_use_translucent_animation_frames(self):
         game = MinigameUI.__new__(MinigameUI)

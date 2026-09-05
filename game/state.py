@@ -120,6 +120,7 @@ class MinigameStateMixin:
         self.game_audio_offset = 0.0
         self.game_audio_job = None
         self.game_finishing = False
+        self.debug_autoplay = False
         self.resolved_notes = set()
         self.note_items = {}
         self.judgements = []
@@ -167,6 +168,7 @@ class MinigameStateMixin:
         self.demonstration_frame_shown = -1
         self.demonstration_overlay_name = None
         self.demonstration_restore_state = None
+        self.demonstration_queue = []
         self.demonstration_end_time = 0.0
         self.game_media_item = None
         self.game_media_photo = None
