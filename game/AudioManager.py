@@ -1,8 +1,12 @@
 import os
+from collections import deque
 from datetime import datetime
 
 
 class AudioPlayer:
+    HITSOUND_CHANNEL_COUNT = 32
+    SFX_CHANNEL_COUNT = 16
+
     def __init__(self):
         self.available = False
         self.current_path = None
@@ -13,6 +17,15 @@ class AudioPlayer:
 
             pygame.mixer.pre_init(44100, -16, 2, 512)
             pygame.mixer.init()
+            pygame.mixer.set_num_channels(max(
+                pygame.mixer.get_num_channels(),
+                self.HITSOUND_CHANNEL_COUNT + self.SFX_CHANNEL_COUNT,
+            ))
+            # Sound.play() for voices and other effects must not use hit channels.
+            pygame.mixer.set_reserved(self.HITSOUND_CHANNEL_COUNT)
+            self.hitsound_channels = deque(
+                pygame.mixer.Channel(index) for index in range(self.HITSOUND_CHANNEL_COUNT)
+            )
             self.pygame = pygame
             self.available = True
             self._print("audio ready")
@@ -54,17 +67,31 @@ class AudioPlayer:
         self.current_path = None
 
     def play_sfx(self, path, volume=1.0):
-        if not self.available or not os.path.isfile(path):
-            if not os.path.isfile(path):
-                self._print(f"sfx file missing: {path}")
+        if not self.available:
             return None
         try:
             if path not in self.sfx_cache:
+                if not os.path.isfile(path):
+                    self._print(f"sfx file missing: {path}")
+                    return None
                 self.sfx_cache[path] = self.pygame.mixer.Sound(path)
-            channel = self.sfx_cache[path].play()
+            sound = self.sfx_cache[path]
+            is_hitsound = os.path.basename(path).casefold() == "hitsound.wav"
+            if is_hitsound:
+                # Prefer a free voice. At saturation, replace only the oldest
+                # hit, never a music/voice channel or a more recent hit attack.
+                channel = next(
+                    (item for item in self.hitsound_channels if not item.get_busy()),
+                    self.hitsound_channels[0],
+                )
+                channel.play(sound)
+                self.hitsound_channels.remove(channel)
+                self.hitsound_channels.append(channel)
+            else:
+                channel = sound.play()
             if channel is not None:
                 channel.set_volume(min(1.0, max(0.0, float(volume))))
-            if(os.path.basename(path) != "hitsound.wav"):
+            if not is_hitsound:
                 self._print(f"[AudioManager] playing sfx: {os.path.basename(path)}")
             return channel
         except Exception as error:
