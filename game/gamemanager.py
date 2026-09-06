@@ -43,6 +43,16 @@ class MinigameGameplayMixin:
         if self.catcher_item is not None:
             self.canvas.coords(self.catcher_item, self._x(self.catcher_x), self._y(1725))
 
+    def _mania_note_positions(self, note, elapsed, lead_time, start_y, hit_y, active_hold):
+        head_y = hit_y if active_hold else min(
+            hit_y,
+            max(start_y, hit_y - (note.time - elapsed) / lead_time * (hit_y - start_y)),
+        )
+        tail_time = note.end_time if note.end_time is not None else note.time
+        tail_y = min(hit_y, hit_y - (tail_time - elapsed) / lead_time * (hit_y - start_y))
+        body_top_y = max(start_y, tail_y + 22)
+        return head_y, tail_y, body_top_y, tail_y >= start_y
+
     def _scroll_lead_time(self, base_seconds):
         return base_seconds / self.settings.get("scroll_speed", 1.30)
 
@@ -438,7 +448,7 @@ class MinigameGameplayMixin:
                 if index not in self.resolved_notes and elapsed > note.time + BAD_WINDOW:
                     self._resolve_note(index, "miss")
         lead_time = self._scroll_lead_time(2.0)
-        start_y = 505
+        start_y = 520.0
         hit_y = self.judgement_line_y
         visible_notes = set()
         for index, note in enumerate(self.track.notes):
@@ -449,21 +459,24 @@ class MinigameGameplayMixin:
             tail_until = (note.end_time if note.end_time is not None else note.time) - elapsed
             if tail_until >= -BAD_WINDOW and time_until <= lead_time:
                 visible_notes.add(index)
-                y = hit_y if active_hold else min(hit_y, hit_y - time_until / lead_time * (hit_y - start_y))
-                tail_y = min(hit_y, hit_y - tail_until / lead_time * (hit_y - start_y))
+                y, tail_y, body_top_y, tail_visible = self._mania_note_positions(
+                    note, elapsed, lead_time, start_y, hit_y, active_hold,
+                )
                 x = self.lane_origin_x + note.lane * self.lane_width
                 if index not in self.note_items:
                     body = None
                     tail = None
                     if note.end_time is not None and note.end_time > note.time:
                         body = self.canvas.create_rectangle(
-                            self._x(x + self.lane_width * 0.112), self._y(tail_y + 22),
+                            self._x(x + self.lane_width * 0.112), self._y(body_top_y),
                             self._x(x + self.lane_width * 0.888), self._y(y + 22),
                             fill="#145fda" if note.lane % 2 == 0 else "#d7d7dc", outline="", tags=("game_note",),
                         )
-                        tail = self.canvas.create_image(
-                            self._x(x), self._y(tail_y), image=self.note_photos[note.lane], anchor="nw", tags=("game_note",),
-                        )
+                        if tail_visible:
+                            tail = self.canvas.create_image(
+                                self._x(x), self._y(tail_y), image=self.note_photos[note.lane],
+                                anchor="nw", tags=("game_note",),
+                            )
                     head = self.canvas.create_image(
                         self._x(x), self._y(y), image=self.note_photos[note.lane], anchor="nw", tags=("game_note",),
                     )
@@ -473,10 +486,19 @@ class MinigameGameplayMixin:
                     self.canvas.coords(items["head"], self._x(x), self._y(y))
                     if items["body"] is not None:
                         self.canvas.coords(
-                            items["body"], self._x(x + self.lane_width * 0.112), self._y(tail_y + 22),
+                            items["body"], self._x(x + self.lane_width * 0.112), self._y(body_top_y),
                             self._x(x + self.lane_width * 0.888), self._y(y + 22),
                         )
-                        self.canvas.coords(items["tail"], self._x(x), self._y(tail_y))
+                        if tail_visible and items["tail"] is None:
+                            items["tail"] = self.canvas.create_image(
+                                self._x(x), self._y(tail_y), image=self.note_photos[note.lane],
+                                anchor="nw", tags=("game_note",),
+                            )
+                        elif tail_visible:
+                            self.canvas.coords(items["tail"], self._x(x), self._y(tail_y))
+                        elif items["tail"] is not None:
+                            self.canvas.delete(items["tail"])
+                            items["tail"] = None
         for index in tuple(self.note_items):
             if index not in visible_notes:
                 for item in self.note_items.pop(index).values():

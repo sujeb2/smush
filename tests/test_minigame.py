@@ -447,6 +447,34 @@ class SelectionTests(unittest.TestCase):
 
 
 class RefactorTests(unittest.TestCase):
+    def test_long_note_geometry_is_clipped_to_gameplay_section(self):
+        game = MinigameUI.__new__(MinigameUI)
+        note = ChartNote(time=1.0, lane=0, end_time=10.0)
+
+        for mode, hit_y in (("2k", 1560.0), ("4k", 1850.0)):
+            with self.subTest(mode=mode):
+                head_y, tail_y, body_top_y, tail_visible = game._mania_note_positions(
+                    note, elapsed=0.0, lead_time=2.0, start_y=520.0,
+                    hit_y=hit_y, active_hold=False,
+                )
+
+                self.assertGreaterEqual(head_y, 520.0)
+                self.assertLess(tail_y, 520.0)
+                self.assertEqual(body_top_y, 520.0)
+                self.assertFalse(tail_visible)
+
+    def test_long_note_tail_becomes_visible_only_after_entering_playfield(self):
+        game = MinigameUI.__new__(MinigameUI)
+        note = ChartNote(time=1.0, lane=0, end_time=3.0)
+
+        _, tail_y, body_top_y, tail_visible = game._mania_note_positions(
+            note, elapsed=2.1, lead_time=2.0, start_y=520.0, hit_y=1560.0, active_hold=True,
+        )
+
+        self.assertGreaterEqual(tail_y, 520.0)
+        self.assertGreaterEqual(body_top_y, 520.0)
+        self.assertTrue(tail_visible)
+
     def test_f8_toggles_debug_autoplay_for_every_mode(self):
         messages = []
         game = MinigameUI.__new__(MinigameUI)
