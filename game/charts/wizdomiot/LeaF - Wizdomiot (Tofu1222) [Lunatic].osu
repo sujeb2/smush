@@ -40,6 +40,7 @@ SliderTickRate:1
 
 [Events]
 //Background and Video events
+Video,-1474,"Wizdomiot.mp4"
 0,0,"BG.png",0,0
 //Break Periods
 //Storyboard Layer 0 (Background)

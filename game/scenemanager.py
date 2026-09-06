@@ -240,7 +240,7 @@ class MinigameSceneMixin:
     def _build_title(self):
         self._image("logo", 540, 270, tags=("title",))
         self._image("title_logo", 540, 1000, tags=("title",))
-        self._text_image("PRESS EITHER BUTTON", 36, 540, 1300, tags=("title",))
+        self._text_image("PRESS ANY BUTTON", 36, 540, 1300, tags=("title",))
         self.serial_failure_item = None
         if self.serial_connection_failed:
             self._show_serial_failure()

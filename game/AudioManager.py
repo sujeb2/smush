@@ -21,7 +21,6 @@ class AudioPlayer:
                 pygame.mixer.get_num_channels(),
                 self.HITSOUND_CHANNEL_COUNT + self.SFX_CHANNEL_COUNT,
             ))
-            # Sound.play() for voices and other effects must not use hit channels.
             pygame.mixer.set_reserved(self.HITSOUND_CHANNEL_COUNT)
             self.hitsound_channels = deque(
                 pygame.mixer.Channel(index) for index in range(self.HITSOUND_CHANNEL_COUNT)
@@ -78,8 +77,6 @@ class AudioPlayer:
             sound = self.sfx_cache[path]
             is_hitsound = os.path.basename(path).casefold() == "hitsound.wav"
             if is_hitsound:
-                # Prefer a free voice. At saturation, replace only the oldest
-                # hit, never a music/voice channel or a more recent hit attack.
                 channel = next(
                     (item for item in self.hitsound_channels if not item.get_busy()),
                     self.hitsound_channels[0],

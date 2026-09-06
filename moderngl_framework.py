@@ -130,8 +130,6 @@ class _CanvasItem:
 
 
 class ModernGLCanvas:
-    """Small Tk Canvas-compatible scene list rendered as GPU textured quads."""
-
     def __init__(self, context, width, height, moderngl_module):
         self.context = context
         self.moderngl = moderngl_module
@@ -245,6 +243,18 @@ class ModernGLCanvas:
     def dtag(self, target, tag):
         for item_id in self._matching(target):
             self.items[item_id].tags.discard(tag)
+
+    def update_video_frame(self, item_id, source, pixels):
+        item = self.items.get(item_id)
+        if item is None:
+            return
+        previous = item.image
+        cached = self.textures.get(id(previous))
+        if cached is not None and cached[0]() is previous and previous.size == source.size:
+            cached[1].write(pixels)
+            self.textures.pop(id(previous))
+            self.textures[id(source)] = (weakref.ref(source), cached[1], self.render_count)
+        item.image = source
 
     def _texture(self, source):
         key = id(source)
