@@ -107,9 +107,9 @@ class Model:
                 if torch.mps.is_available(): device="mps:0"
                 self.model = YOLO(
                     self.model_path,
-                    task='detect',
                     verbose=config['GENERIC'].getboolean('Verbose'),
                 ).to(device=device)
+                print(f"[{self.timestamp}] [ModelRecog] task: {self.model.task}, classes: {self.model.names}")
             except Exception:
                 if os.path.basename(self.model_path) not in imageai_supported:
                     raise
@@ -122,7 +122,7 @@ class Model:
                 if not ret or frame is None:
                     print(f"[{self.timestamp}] [ModelRecog] failed to grab frame from camera.")
                     return 1
-                self.detections = self.model.predict(source=frame, conf=0.5, stream=True)
+                self.detections = self.predict(frame)
 
                 for result in self.detections:
                     if show_preview:
@@ -131,11 +131,14 @@ class Model:
                         except cv2.error:
                             print(f"[{self.timestamp}] [ModelRecog] failed to grab camera.")
                             traceback.print_exc()
-                            self._close_live_preview()
+                            self.closePreview()
                             show_preview = False
                     if config['DETECTION'].getboolean('HasExpectedObject'):
-                        self.confident = result.boxes.conf
-                        self.names = [result.names[cls.item()] for cls in result.boxes.cls.int()]
+                        recognized = self.foundObjs(result)
+                        self.names = [name for name, confidence in recognized]
+                        self.confident = [confidence for name, confidence in recognized]
+                        if result.probs is not None:
+                            print(f'[{self.timestamp}] [ModelRecog] top class: {result.names[result.probs.top1]}, confidence: {float(result.probs.top1conf):.4f}')
                         print(f'[{self.timestamp}] [ModelRecog] confident: {self.confident}, names: {self.names}')
                         for index in (1, 2):
                             expected = config['DETECTION'].get(f'ExpectedObject_{index}')
@@ -150,7 +153,7 @@ class Model:
                     except cv2.error:
                         print(f"[{self.timestamp}] [ModelRecog] camera preview failed")
                         traceback.print_exc()
-                        self._close_live_preview()
+                        self.closePreview()
                         show_preview = False
                     else:
                         if key == ord('q'):
@@ -163,9 +166,29 @@ class Model:
         finally:
             self.camera.release()
             if show_preview:
-                self._close_live_preview()
+                self.closePreview()
 
-    def _close_live_preview(self):
+    def predict(self, source):
+        options = {}
+        if self.model.task != 'classify':
+            options['conf'] = config['DETECTION'].getfloat('Confidence', fallback=0.5)
+        return self.model.predict(source=source, stream=True, **options)
+
+    def foundObjs(self, result):
+        if result.probs is not None:
+            confidence = float(result.probs.top1conf)
+            threshold = config['DETECTION'].getfloat('ClassificationConfidence', fallback=0.8)
+            if confidence >= threshold:
+                return [(result.names[result.probs.top1], confidence)]
+            return []
+        if result.boxes is None:
+            return []
+        return [
+            (result.names[int(class_id)], float(confidence))
+            for class_id, confidence in zip(result.boxes.cls, result.boxes.conf)
+        ]
+
+    def closePreview(self):
         try:
             cv2.destroyAllWindows()
         except cv2.error:
@@ -190,7 +213,7 @@ class Model:
                 key = cv2.waitKey(1) & 0xFF
             except cv2.error:
                 traceback.print_exc()
-                self._close_live_preview()
+                self.closePreview()
                 show_preview = False
                 return
             if key == ord('q'):
@@ -267,13 +290,11 @@ class Model:
                 if key == ord('c'):
                     cv2.imwrite(self.path, img)
                     print(f"[{self.timestamp}] [ModelRecog] Image captured. Running detection...")
-                    self.detections = self.model.predict(source=self.path, conf=0.10, stream=True)
+                    self.detections = self.predict(self.path)
                     
                     for result in self.detections:
-                        for i in range(len(result.boxes)):
-                            class_id = int(result.boxes.cls[i])
-                            class_name = result.names[class_id]
-                            probability = float(result.boxes.conf[i]) * 100
+                        for class_name, confidence in self.foundObjs(result):
+                            probability = confidence * 100
                             
                             print(f"[{self.timestamp}] [ModelRecog] detected: {class_name} with probability: {probability:.2f}%")
                         annotated_img = result.plot() 
