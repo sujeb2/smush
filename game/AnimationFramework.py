@@ -231,6 +231,16 @@ class MinigameAnimationMixin:
                 size = 63 if name == "score" else 29
                 self.canvas.itemconfigure(self.result_value_items[name], image=self._text(str(value), size))
                 self.result_values_shown[name] = value
+    def _animate_scroll_speed_warning(self, now):
+        if self.scroll_speed_warning_item is None:
+            return
+        offset = 8 * math.sin((now - self.scene_started) * math.tau / 2.4)
+        self.canvas.move(
+            self.scroll_speed_warning_item, 0,
+            (offset - self.scroll_speed_warning_offset) * self.scale,
+        )
+        self.scroll_speed_warning_offset = offset
+
     def _animate_selection_scroll(self, now):
         if self.selection_scroll_started is None:
             return
@@ -445,6 +455,7 @@ class MinigameAnimationMixin:
         elif self.scene == "select":
             self._animate_warning_select_morph(now)
             self._animate_selection_scroll(now)
+            self._animate_scroll_speed_warning(now)
             self._animate_select_preview(now)
             remaining = max(0, int(self.select_deadline - now + 0.999))
             self._update_timer(self.select_time_item, remaining, "select_time_shown")

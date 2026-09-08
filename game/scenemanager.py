@@ -51,6 +51,8 @@ class MinigameSceneMixin:
         self.selection_scroll_swapped = False
         self.selection_heading_item = None
         self.selection_sweep_item = None
+        self.scroll_speed_warning_item = None
+        self.scroll_speed_warning_offset = 0.0
         self.select_morph_in_started = None
         self.select_morph_in_offset = 0.0
         self.down_button_item = None
@@ -506,6 +508,13 @@ class MinigameSceneMixin:
             self._text_image(detail.upper(), 26, 100, 1295, anchor="w", tags=tags)
         self._text_image(str(self.track.level), 92, 930, 1230, tags=tags)
         self._text_image("LEVEL", 21, 930, 1305, tags=tags)
+        self.scroll_speed_warning_item = None
+        self.scroll_speed_warning_offset = 0.0
+        if self.track.has_scroll_speed_changes:
+            self.scroll_speed_warning_item = self._image(
+                "scrollspeed_warn", 115, 1440, anchor="nw", tags=tags,
+            )
+
 
     def _create_selection_sweep(self):
         if self.selection_sweep_item is not None:

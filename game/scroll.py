@@ -1,5 +1,3 @@
-"""Continuous scroll coordinates, normalized to the chart's initial tempo."""
-
 from bisect import bisect_right
 import math
 
@@ -19,7 +17,6 @@ def parse_tempo_points(lines):
 
 
 def parse_scroll_points(lines):
-    """Combine red BPM points and green SV points into effective beat lengths."""
     events = []
     for line in lines:
         fields = line.split(",")
@@ -30,7 +27,6 @@ def parse_scroll_points(lines):
             continue
         if math.isfinite(offset) and math.isfinite(value) and ((red and value > 0) or (not red and value < 0)):
             events.append((offset, red, value))
-    # Process BPM before SV at a shared timestamp, preserving order within each type.
     events.sort(key=lambda event: (event[0], not event[1]))
     beat_ms = next((value for _, red, value in events if red), 500.0)
     points = {}

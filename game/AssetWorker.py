@@ -23,6 +23,7 @@ IMAGE_PATHS = {
     "demonstration_coin": ("generic", "demonstration_insertcoin.png"),
     "select_bg": ("music_select", "select_music_bg.png"),
     "select_icon": ("music_select", "select_icon.png"),
+    "scrollspeed_warn": ("music_select", "scrollspeed_warn.png"),
     "down_button": ("music_select", "down_bt.png"),
     "previous": ("music_select", "prev_music.png"),
     "next_arrow": ("music_select", "next_arrow.png"),

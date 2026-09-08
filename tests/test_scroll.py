@@ -1,14 +1,32 @@
 import os
 import tempfile
 import unittest
+from dataclasses import replace
 from types import SimpleNamespace
 
 from game.gamemanager import MinigameGameplayMixin
-from game.osu_chart import ChartNote, derive_4k_chart, parse_osu_catch, parse_osu_mania_2k, parse_osu_mania_4k
+from game.osu_chart import ChartNote, OsuManiaChart, derive_4k_chart, parse_osu_catch, parse_osu_mania_2k, parse_osu_mania_4k
 from game.scroll import ScrollTimeline, parse_scroll_points, parse_tempo_points
 
 
 class ScrollTests(unittest.TestCase):
+    def test_scroll_warning_tracks_effective_speed_changes(self):
+        chart = OsuManiaChart("", "", 14, "", "", "", "", 1, 5, "", 0, ())
+        cases = (
+            ((), False),
+            (("0,500",), False),
+            (("0,500", "1000,500,4,2,1,80,1,1"), False),
+            (("0,500", "1000,250"), True),
+            (("0,500", "1000,-50,4,2,1,60,0,0"), True),
+            (("0,500", "0,-50,4,2,1,60,0,0", "1000,-50,4,2,1,80,0,1"), False),
+            (("0,500", "0,-50,4,2,1,60,0,0", "1000,500"), True),
+        )
+        for lines, expected in cases:
+            with self.subTest(lines=lines):
+                selected = replace(chart, tempo_points=parse_tempo_points(lines),
+                                   scroll_points=parse_scroll_points(lines))
+                self.assertEqual(selected.has_scroll_speed_changes, expected)
+
     def test_inherited_velocity_and_bpm_reset(self):
         points = parse_scroll_points(("0,500", "1000,-50,4,2,1,60,0,0",
                                       "2000,-200,4,2,1,60,0,0", "3000,250"))

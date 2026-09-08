@@ -55,6 +55,11 @@ class OsuManiaChart:
     def scroll_position(self, seconds):
         return self.scroll_timeline.position(seconds)
 
+    @cached_property
+    def has_scroll_speed_changes(self):
+        rates = self.scroll_timeline.rates
+        return any(not math.isclose(rate, rates[0], rel_tol=1e-6) for rate in rates[1:])
+
     @property
     def level(self):
         return max(1, round(self.overall_difficulty))
