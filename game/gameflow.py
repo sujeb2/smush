@@ -35,6 +35,9 @@ class MinigameFlowMixin:
         self._print(f"coin accepted: {self._credit_status_text()}")
 
     def _handle_key(self, event):
+        if event.keysym in ("F6", "f6"):
+            self._toggle_led_preview()
+            return
         if event.keysym in ("F8", "f8"):
             self._toggle_debug_autoplay()
             return

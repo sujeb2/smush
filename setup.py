@@ -11,6 +11,7 @@ build_exe_options = {
         ("files/img", "files/img"),
         ("files/models", "files/models"),
         ("files/main_conf.ini", "files/main_conf.ini"),
+        ("files/led_animations.json", "files/led_animations.json"),
         ("files/model_conf.ini", "files/model_conf.ini"),
         ("game/bgm", "game/bgm"),
         ("game/charts", "game/charts"),

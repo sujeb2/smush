@@ -1,0 +1,354 @@
+{
+  "version": 1,
+  "scenes": {
+    "preload": {
+      "loop": true,
+      "steps": [
+        {
+          "ms": 500,
+          "leds": [
+            false,
+            false,
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    "ci": {
+      "loop": true,
+      "steps": [
+        {
+          "ms": 500,
+          "leds": [
+            false,
+            false,
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    "title": {
+      "loop": true,
+      "steps": [
+        {
+          "ms": 200,
+          "leds": [
+            true,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "ms": 200,
+          "leds": [
+            false,
+            true,
+            false,
+            false
+          ]
+        },
+        {
+          "ms": 200,
+          "leds": [
+            false,
+            false,
+            true,
+            false
+          ]
+        },
+        {
+          "ms": 200,
+          "leds": [
+            false,
+            false,
+            false,
+            true
+          ]
+        }
+      ]
+    },
+    "entry": {
+      "loop": true,
+      "steps": [
+        {
+          "ms": 500,
+          "leds": [
+            true,
+            false,
+            false,
+            true
+          ]
+        },
+        {
+          "ms": 500,
+          "leds": [
+            false,
+            false,
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    "warning": {
+      "loop": true,
+      "steps": [
+        {
+          "ms": 150,
+          "leds": [
+            false,
+            false,
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    "mode_select": {
+      "loop": true,
+      "steps": [
+        {
+          "ms": 500,
+          "leds": [
+            true,
+            false,
+            false,
+            true
+          ]
+        },
+        {
+          "ms": 100,
+          "leds": [
+            false,
+            false,
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    "title_select": {
+      "loop": true,
+      "steps": [
+        {
+          "ms": 500,
+          "leds": [
+            false,
+            false,
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    "select": {
+      "loop": true,
+      "steps": [
+        {
+          "ms": 1000,
+          "leds": [
+            true,
+            false,
+            false,
+            true
+          ]
+        },
+        {
+          "ms": 1000,
+          "leds": [
+            false,
+            false,
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    "next": {
+      "loop": true,
+      "steps": [
+        {
+          "ms": 100,
+          "leds": [
+            true,
+            true,
+            true,
+            true
+          ]
+        },
+        {
+          "ms": 100,
+          "leds": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "ms": 100,
+          "leds": [
+            true,
+            true,
+            true,
+            true
+          ]
+        },
+        {
+          "ms": 100,
+          "leds": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "ms": 100,
+          "leds": [
+            true,
+            true,
+            true,
+            true
+          ]
+        },
+        {
+          "ms": 100,
+          "leds": [
+            false,
+            false,
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    "game": {
+      "loop": false,
+      "steps": [
+        {
+          "ms": 200,
+          "leds": [
+            false,
+            false,
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    "demonstration": {
+      "loop": true,
+      "steps": [
+        {
+          "ms": 200,
+          "leds": [
+            true,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "ms": 200,
+          "leds": [
+            false,
+            true,
+            false,
+            false
+          ]
+        },
+        {
+          "ms": 200,
+          "leds": [
+            false,
+            false,
+            true,
+            false
+          ]
+        },
+        {
+          "ms": 200,
+          "leds": [
+            false,
+            false,
+            false,
+            true
+          ]
+        }
+      ]
+    },
+    "result": {
+      "loop": true,
+      "steps": [
+        {
+          "ms": 250,
+          "leds": [
+            true,
+            false,
+            false,
+            true
+          ]
+        },
+        {
+          "ms": 250,
+          "leds": [
+            false,
+            false,
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    "total_result": {
+      "loop": true,
+      "steps": [
+        {
+          "ms": 500,
+          "leds": [
+            false,
+            false,
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    "ending": {
+      "loop": true,
+      "steps": [
+        {
+          "ms": 500,
+          "leds": [
+            true,
+            false,
+            false,
+            true
+          ]
+        },
+        {
+          "ms": 500,
+          "leds": [
+            false,
+            true,
+            true,
+            false
+          ]
+        },
+        {
+          "ms": 500,
+          "leds": [
+            false,
+            false,
+            false,
+            false
+          ]
+        }
+      ]
+    }
+  }
+}

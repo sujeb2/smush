@@ -475,8 +475,6 @@ class PygameRoot:
 
 
 class ModernGLUIFramework:
-    """GPU renderer used by the minigame; the service/test UIs remain Tkinter."""
-
     def __init__(self, title, fullscreen=True, windowed_geometry="540x960"):
         try:
             import moderngl
@@ -563,7 +561,6 @@ class ModernGLUIFramework:
         self.serial = serial_io
 
     def show_unrecoverable_error(self, code, detail):
-        """Stop all scene callbacks and leave only the fatal-error UI active."""
         if not self.running:
             return
         self.unrecoverable_error = True

@@ -72,6 +72,7 @@ class Main:
             fullscreen=fullscreen,
             progress_path=os.path.join(base, progress_file),
             test_mode_callback=self._enter_test_mode,
+            demo_mode=self.args.demo,
         )
         self.ui.root.after(100, self._start_minigame_serial)
         print(f"[{self.timestamp}] [main] minigame visible")
@@ -381,11 +382,16 @@ def parse_args():
     parser.add_argument("--skip-update", action="store_true")
     parser.add_argument("--test-mode", action="store_true")
     parser.add_argument("--minigame", action="store_true")
+    parser.add_argument("--led-editor", action="store_true")
     return parser.parse_args()
 
 
 def run():
     args = parse_args()
+    if args.led_editor:
+        from lededitor import run as run_led_editor
+        run_led_editor()
+        return
     try:
         Main(args)
     except Exception as error:

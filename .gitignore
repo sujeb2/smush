@@ -232,3 +232,4 @@ main.build/
 nuitka-crash-report.xml
 exp-2/
 runs/
+lededitor.py

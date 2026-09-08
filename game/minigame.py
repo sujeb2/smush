@@ -5,6 +5,7 @@ from datetime import datetime
 from game.AnimationFramework import MinigameAnimationMixin
 from game.AssetWorker import load_minigame_assets
 from game.AudioManager import AudioPlayer
+from game.led_runtime import LedRuntimeMixin
 from game.gameflow import MinigameFlowMixin
 from game.scenes import MinigameGameSceneMixin
 from game.gamemanager import MinigameGameplayMixin
@@ -43,6 +44,7 @@ from ui_framework import find_compiled_dir
 from moderngl_framework import ModernGLUIFramework
 
 class MinigameUI(
+    LedRuntimeMixin,
     MinigameStateMixin,
     MinigamePreloadMixin,
     MinigameFlowMixin,
@@ -54,7 +56,7 @@ class MinigameUI(
     MinigameAnimationMixin,
     ModernGLUIFramework,
 ):
-    def __init__(self, config_path, fullscreen=True, progress_path=None, test_mode_callback=None):
+    def __init__(self, config_path, fullscreen=True, progress_path=None, test_mode_callback=None, demo_mode=False):
         self.settings = self._load_settings(config_path)
         super().__init__("SMUSH MINIGAME", fullscreen=fullscreen)
         charts_root = os.path.join(self.base, self.settings["charts_root"])
@@ -79,6 +81,7 @@ class MinigameUI(
             earned, self.coin_count = divmod(self.coin_count, self.coins_per_credit)
             self.credit_count += earned
         self._initialize_state()
+        self._initialize_leds(config_path, demo_mode)
         self.recovery_startup = previous_error_details(self.base) is not None
         self.audio = AudioPlayer()
         self.root.bind("<KeyPress>", self._handle_key)
@@ -135,6 +138,7 @@ class MinigameUI(
         super().show_unrecoverable_error(code, detail)
 
     def close(self):
+        self._close_leds()
         self._close_select_video()
         self._close_game_video()
         self.audio.close()
@@ -147,7 +151,7 @@ def run_demo():
     parser.add_argument("--progress-file")
     args = parser.parse_args()
     config_path = os.path.join(find_compiled_dir(), "files", "main_conf.ini")
-    app = MinigameUI(config_path, fullscreen=not args.windowed, progress_path=args.progress_file)
+    app = MinigameUI(config_path, fullscreen=not args.windowed, progress_path=args.progress_file, demo_mode=True)
     app.run()
 
 
