@@ -3,6 +3,9 @@ import math
 import os
 import re
 from dataclasses import dataclass, replace
+from functools import cached_property
+
+from game.scroll import ScrollTimeline, parse_scroll_points, parse_tempo_points
 
 
 class OsuChartError(ValueError):
@@ -41,6 +44,16 @@ class OsuManiaChart:
     background_path: str = None
     video_path: str = None
     video_start_time: int = 0
+    tempo_points: tuple = ()
+    scroll_points: tuple = ()
+
+    @cached_property
+    def scroll_timeline(self):
+        base_beat_ms = self.tempo_points[0][1] if self.tempo_points else 500.0
+        return ScrollTimeline(self.scroll_points or self.tempo_points, base_beat_ms)
+
+    def scroll_position(self, seconds):
+        return self.scroll_timeline.position(seconds)
 
     @property
     def level(self):
@@ -227,6 +240,8 @@ def parse_osu_mania(path, key_count=None):
         background_path=background_path,
         video_path=video_path,
         video_start_time=video_start_time,
+        tempo_points=parse_tempo_points(sections.get("TimingPoints", ())),
+        scroll_points=parse_scroll_points(sections.get("TimingPoints", ())),
     )
 
 
@@ -346,6 +361,8 @@ def parse_osu_catch(path):
         background_path=background_path,
         video_path=video_path,
         video_start_time=video_start_time,
+        tempo_points=parse_tempo_points(sections.get("TimingPoints", ())),
+        scroll_points=parse_scroll_points(sections.get("TimingPoints", ())),
     )
 
 

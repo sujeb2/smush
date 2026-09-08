@@ -43,13 +43,19 @@ class MinigameGameplayMixin:
         if self.catcher_item is not None:
             self.canvas.coords(self.catcher_item, self._x(self.catcher_x), self._y(1725))
 
+    def _scroll_distance(self, target_time, elapsed):
+        position = getattr(getattr(self, "track", None), "scroll_position", None)
+        if position is None:
+            return target_time - elapsed
+        return position(target_time) - position(elapsed)
+
     def _mania_note_positions(self, note, elapsed, lead_time, start_y, hit_y, active_hold):
         head_y = hit_y if active_hold else min(
             hit_y,
-            max(start_y, hit_y - (note.time - elapsed) / lead_time * (hit_y - start_y)),
+            max(start_y, hit_y - self._scroll_distance(note.time, elapsed) / lead_time * (hit_y - start_y)),
         )
         tail_time = note.end_time if note.end_time is not None else note.time
-        tail_y = min(hit_y, hit_y - (tail_time - elapsed) / lead_time * (hit_y - start_y))
+        tail_y = min(hit_y, hit_y - self._scroll_distance(tail_time, elapsed) / lead_time * (hit_y - start_y))
         body_top_y = max(start_y, tail_y + 22)
         return head_y, tail_y, body_top_y, tail_y >= start_y
 
@@ -406,8 +412,9 @@ class MinigameGameplayMixin:
                 caught = autoplay or abs(target_x - self.catcher_x) <= catcher_half_width
                 self._resolve_catch(index, caught)
                 continue
-            if time_until <= lead_time:
-                y = catch_y - time_until / lead_time * (catch_y - start_y)
+            scroll_until = self._scroll_distance(note.time, elapsed)
+            if scroll_until <= lead_time:
+                y = catch_y - scroll_until / lead_time * (catch_y - start_y)
                 if index not in self.note_items:
                     self.note_items[index] = self.canvas.create_image(
                         self._x(target_x), self._y(y), image=self._asset_photo("catch_object"),
@@ -455,7 +462,7 @@ class MinigameGameplayMixin:
             active_hold = index in self.active_holds
             if index in self.resolved_notes and not active_hold:
                 continue
-            time_until = note.time - elapsed
+            time_until = self._scroll_distance(note.time, elapsed)
             tail_until = (note.end_time if note.end_time is not None else note.time) - elapsed
             if tail_until >= -BAD_WINDOW and time_until <= lead_time:
                 visible_notes.add(index)
