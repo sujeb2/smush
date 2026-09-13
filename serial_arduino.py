@@ -1,4 +1,5 @@
 import serial
+import threading
 from datetime import datetime
 
 class SerialIO:
@@ -8,7 +9,8 @@ class SerialIO:
         self.baudrate = baudrate
         self.timeout = timeout
         print(f"[{self.timestamp}] [SerialIO] Initializing serial port: {port} at {baudrate} baudrate with timeout {timeout}.")
-        self.ser = serial.Serial(port, baudrate, timeout=timeout)
+        self.write_lock = threading.Lock()
+        self.ser = serial.Serial(port, baudrate, timeout=timeout, write_timeout=0.2)
         print(f"[{self.timestamp}] [SerialIO] Serial port init done: {port} at {baudrate} baudrate.")
 
     def open(self):
@@ -24,7 +26,8 @@ class SerialIO:
         serial data write, data shouldn't be null
         """
         if self.ser.is_open and data is not None:
-            self.ser.write(data.encode('utf-8'))
+            with self.write_lock:
+                self.ser.write(data.encode('utf-8'))
             print(f'[{self.timestamp}] [SerialIO] write: {data}')
 
     def write_command(self, command):
@@ -48,6 +51,17 @@ class SerialIO:
             print(f'[{self.timestamp}] [SerialIO] read: {message}')
             return message
         return None
+
+    def set_led_frame(self, switches, pixels):
+        """Atomically send four switch states and four RGB pixels."""
+        if len(switches) != 4 or any(type(v) is not bool for v in switches):
+            raise ValueError("four boolean switch states required")
+        if len(pixels) != 4 or any(len(p) != 3 or any(type(v) is not int or not 0 <= v <= 255 for v in p) for p in pixels):
+            raise ValueError("four RGB pixels with byte values required")
+        if not self.is_open:
+            raise serial.SerialException("LED serial port is closed")
+        mask = sum(1 << index for index, on in enumerate(switches) if on)
+        self.write_command(f"LED{mask:X}:" + "".join(f"{v:02X}" for p in pixels for v in p))
 
     @property
     def is_open(self):

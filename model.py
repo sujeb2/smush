@@ -53,7 +53,6 @@ class Model:
             self.vc = cv2.VideoCapture(0)
             self.model_path = model_path
             self.serial_ignore = True
-            # Allow the YOLO checkpoint's model classes with PyTorch 2.6+ weights-only loading.
             torch.serialization.add_safe_globals(weights)
             if(config['GENERIC']['IgnoreGPUWarning'] == 'False'):
                 if(not torch.cuda.is_available()):

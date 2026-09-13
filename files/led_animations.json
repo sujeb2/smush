@@ -13,7 +13,25 @@
             false
           ]
         }
-      ]
+      ],
+      "neopixel": {
+        "mode": "off",
+        "speed": 1.0,
+        "brightness": 0.15,
+        "pulse_fraction": 0.65,
+        "offset_ms": 0.0,
+        "high_health": true,
+        "colors": [
+          "#46AAFF",
+          "#FFFFFF",
+          "#46AAFF",
+          "#FFFFFF"
+        ],
+        "right_colors": [
+          "#FFAA00",
+          "#FF4400"
+        ]
+      }
     },
     "ci": {
       "loop": true,
@@ -27,7 +45,25 @@
             false
           ]
         }
-      ]
+      ],
+      "neopixel": {
+        "mode": "off",
+        "speed": 1.0,
+        "brightness": 0.15,
+        "pulse_fraction": 0.65,
+        "offset_ms": 0.0,
+        "high_health": true,
+        "colors": [
+          "#46AAFF",
+          "#FFFFFF",
+          "#46AAFF",
+          "#FFFFFF"
+        ],
+        "right_colors": [
+          "#FFAA00",
+          "#FF4400"
+        ]
+      }
     },
     "title": {
       "loop": true,
@@ -95,7 +131,25 @@
             false
           ]
         }
-      ]
+      ],
+      "neopixel": {
+        "mode": "rainbow",
+        "speed": 0.5,
+        "brightness": 1.0,
+        "pulse_fraction": 0.65,
+        "offset_ms": 0.0,
+        "high_health": true,
+        "colors": [
+          "#46AAFF",
+          "#FFFFFF",
+          "#46AAFF",
+          "#FFFFFF"
+        ],
+        "right_colors": [
+          "#FFAA00",
+          "#FF4400"
+        ]
+      }
     },
     "entry": {
       "loop": true,
@@ -118,7 +172,25 @@
             false
           ]
         }
-      ]
+      ],
+      "neopixel": {
+        "mode": "rainbow",
+        "speed": 1.0,
+        "brightness": 1.0,
+        "pulse_fraction": 0.65,
+        "offset_ms": 0.0,
+        "high_health": true,
+        "colors": [
+          "#46AAFF",
+          "#FFFFFF",
+          "#46AAFF",
+          "#FFFFFF"
+        ],
+        "right_colors": [
+          "#FFAA00",
+          "#FF4400"
+        ]
+      }
     },
     "warning": {
       "loop": true,
@@ -132,7 +204,25 @@
             false
           ]
         }
-      ]
+      ],
+      "neopixel": {
+        "mode": "solid",
+        "speed": 1.0,
+        "brightness": 1.0,
+        "pulse_fraction": 0.65,
+        "offset_ms": 0.0,
+        "high_health": false,
+        "colors": [
+          "#FF1600",
+          "#FF294E",
+          "#FF374F",
+          "#FF5460"
+        ],
+        "right_colors": [
+          "#FFAA00",
+          "#FF4400"
+        ]
+      }
     },
     "mode_select": {
       "loop": true,
@@ -155,7 +245,25 @@
             false
           ]
         }
-      ]
+      ],
+      "neopixel": {
+        "mode": "solid",
+        "speed": 1.0,
+        "brightness": 1.0,
+        "pulse_fraction": 0.65,
+        "offset_ms": 0.0,
+        "high_health": false,
+        "colors": [
+          "#46AAFF",
+          "#FFFFFF",
+          "#46AAFF",
+          "#FFFFFF"
+        ],
+        "right_colors": [
+          "#FFAA00",
+          "#FF4400"
+        ]
+      }
     },
     "title_select": {
       "loop": true,
@@ -169,7 +277,25 @@
             false
           ]
         }
-      ]
+      ],
+      "neopixel": {
+        "mode": "off",
+        "speed": 1.0,
+        "brightness": 0.15,
+        "pulse_fraction": 0.65,
+        "offset_ms": 0.0,
+        "high_health": false,
+        "colors": [
+          "#46AAFF",
+          "#FFFFFF",
+          "#46AAFF",
+          "#FFFFFF"
+        ],
+        "right_colors": [
+          "#FFAA00",
+          "#FF4400"
+        ]
+      }
     },
     "select": {
       "loop": true,
@@ -192,7 +318,25 @@
             false
           ]
         }
-      ]
+      ],
+      "neopixel": {
+        "mode": "beat",
+        "speed": 1.0,
+        "brightness": 1.0,
+        "pulse_fraction": 0.65,
+        "offset_ms": 0.0,
+        "high_health": false,
+        "colors": [
+          "#46AAFF",
+          "#FFFFFF",
+          "#46AAFF",
+          "#FFFFFF"
+        ],
+        "right_colors": [
+          "#FFAA00",
+          "#FF4400"
+        ]
+      }
     },
     "next": {
       "loop": false,
@@ -251,7 +395,25 @@
             false
           ]
         }
-      ]
+      ],
+      "neopixel": {
+        "mode": "rainbow",
+        "speed": 1.0,
+        "brightness": 0.15,
+        "pulse_fraction": 0.65,
+        "offset_ms": 0.0,
+        "high_health": true,
+        "colors": [
+          "#46AAFF",
+          "#FFFFFF",
+          "#46AAFF",
+          "#FFFFFF"
+        ],
+        "right_colors": [
+          "#FFAA00",
+          "#FF4400"
+        ]
+      }
     },
     "game": {
       "loop": false,
@@ -265,7 +427,25 @@
             false
           ]
         }
-      ]
+      ],
+      "neopixel": {
+        "mode": "beat",
+        "speed": 1.0,
+        "brightness": 0.15,
+        "pulse_fraction": 0.65,
+        "offset_ms": 0.0,
+        "high_health": true,
+        "colors": [
+          "#46AAFF",
+          "#FFFFFF",
+          "#46AAFF",
+          "#FFFFFF"
+        ],
+        "right_colors": [
+          "#FFAA00",
+          "#FF4400"
+        ]
+      }
     },
     "demonstration": {
       "loop": true,
@@ -306,7 +486,25 @@
             true
           ]
         }
-      ]
+      ],
+      "neopixel": {
+        "mode": "beat",
+        "speed": 1.0,
+        "brightness": 0.15,
+        "pulse_fraction": 0.65,
+        "offset_ms": 0.0,
+        "high_health": true,
+        "colors": [
+          "#46AAFF",
+          "#FFFFFF",
+          "#46AAFF",
+          "#FFFFFF"
+        ],
+        "right_colors": [
+          "#41AFF8",
+          "#FF4400"
+        ]
+      }
     },
     "result": {
       "loop": true,
@@ -329,7 +527,25 @@
             false
           ]
         }
-      ]
+      ],
+      "neopixel": {
+        "mode": "rainbow",
+        "speed": 1.0,
+        "brightness": 0.15,
+        "pulse_fraction": 0.65,
+        "offset_ms": 0.0,
+        "high_health": false,
+        "colors": [
+          "#46AAFF",
+          "#FFFFFF",
+          "#46AAFF",
+          "#FFFFFF"
+        ],
+        "right_colors": [
+          "#FFAA00",
+          "#FF4400"
+        ]
+      }
     },
     "total_result": {
       "loop": true,
@@ -352,7 +568,25 @@
             false
           ]
         }
-      ]
+      ],
+      "neopixel": {
+        "mode": "solid",
+        "speed": 1.0,
+        "brightness": 0.15,
+        "pulse_fraction": 0.65,
+        "offset_ms": 0.0,
+        "high_health": true,
+        "colors": [
+          "#46AAFF",
+          "#FFFFFF",
+          "#46AAFF",
+          "#FFFFFF"
+        ],
+        "right_colors": [
+          "#FFAA00",
+          "#FF4400"
+        ]
+      }
     },
     "ending": {
       "loop": true,
@@ -375,7 +609,29 @@
             false
           ]
         }
-      ]
+      ],
+      "neopixel": {
+        "mode": "rainbow",
+        "speed": 1.0,
+        "brightness": 0.15,
+        "pulse_fraction": 0.65,
+        "offset_ms": 0.0,
+        "high_health": true,
+        "colors": [
+          "#46AAFF",
+          "#FFFFFF",
+          "#46AAFF",
+          "#FFFFFF"
+        ],
+        "right_colors": [
+          "#FFAA00",
+          "#FF4400"
+        ]
+      }
     }
+  },
+  "neopixel": {
+    "enabled": true,
+    "preview_bpm": 120.0
   }
 }
