@@ -19,6 +19,7 @@ from game.rules import (
     rank_for_accuracy,
 )
 from game.persistence import save_progress
+from game.session import GameSession
 
 
 class MinigameFlowMixin:
@@ -121,7 +122,13 @@ class MinigameFlowMixin:
             if self.coins_per_credit == 0 or self.credit_count > 0:
                 self._start_demonstration_entry()
         elif self.scene == "result":
-            self.start_result_transition()
+            if getattr(self, "extra_challenge_prompt", False):
+                if lane == 0:
+                    self._accept_extra_challenge()
+                elif lane == 1:
+                    self.start_result_transition()
+            else:
+                self.start_result_transition()
         elif self.scene == "total_result" and lane == 1:
             self.start_total_result_transition()
 
@@ -199,12 +206,17 @@ class MinigameFlowMixin:
         self._start_loading("select", self._show_initial_select)
 
     def _show_initial_select(self):
+        self.extra_stage_active = False
+        self.extra_challenge_prompt = False
+        self._apply_game_mode(self.game_mode)
         if self.track_index == 0:
             self.track_scores = [0] * EVENT_TRACK_COUNT
             self.track_names = [""] * EVENT_TRACK_COUNT
+            self.track_ranks = [""] * EVENT_TRACK_COUNT
             try:
                 save_progress(
                     self.progress_path, self.track_index, EVENT_TRACK_COUNT, self.track_scores, self.track_names,
+                    getattr(self, "track_ranks", None),
                 )
             except OSError as error:
                 self._print(f"progress save failed: {error}")
@@ -575,15 +587,8 @@ class MinigameFlowMixin:
         self.game_started = self.scene_started + pre_roll
         self.game_audio_started = False
         self.game_audio_offset = audio_offset
-        self.resolved_notes = set()
-        self.judgements = []
-        self.counts = {key: 0 for key in (("catch", "miss") if self.game_mode == "catch" else JUDGEMENT_WEIGHT)}
-        self.health = 100.0
+        self.gameplay = GameSession.for_mode(self.game_mode)
         self.display_health = 100.0
-        self.score = 0
-        self.combo = 0
-        self.max_combo = 0
-        self.active_holds = {}
         self.catcher_x = 540.0
         self.catcher_velocity = 0.0
         self.catcher_last_update = self.scene_started
@@ -711,13 +716,23 @@ class MinigameFlowMixin:
             if self.game_mode == "catch"
             else calculate_score(self.judgements, len(self.track.notes))
         )
-        self.track_scores[self.track_index] = self.score
-        self.track_names[self.track_index] = self.track.title
+        if not getattr(self, "extra_stage_active", False):
+            self.track_scores[self.track_index] = self.score
+            self.track_names[self.track_index] = self.track.title
         self.result_final_counts = dict(self.counts)
         self.accuracy = calculate_accuracy(
             self.judgements, len(self.track.notes), catch_mode=self.game_mode == "catch",
         )
         self.rank = rank_for_accuracy(self.accuracy)
+        if not getattr(self, "extra_stage_active", False):
+            if not hasattr(self, "track_ranks"):
+                self.track_ranks = [""] * EVENT_TRACK_COUNT
+            self.track_ranks[self.track_index] = self.rank
+        self.extra_challenge_prompt = (
+            self.track_index == EVENT_TRACK_COUNT - 1 and self._extra_challenge_available()
+        )
+        self.extra_challenge_started = None
+        self.extra_challenge_offset = 1120.0
         self.result_rank_voice_played = False
         self.result_rank_sfx_channel = None
         self.result_rank_voice_channel = None
@@ -746,12 +761,18 @@ class MinigameFlowMixin:
             or time.monotonic() < self.result_unlock_at
         ):
             return
+        self.extra_challenge_prompt = False
         self._stop_result_rank_audio()
+        if getattr(self, "extra_stage_active", False):
+            self._play_sfx("ok.wav")
+            self._start_loading("ending", self.show_ending)
+            return
         self.result_transition_target, next_track = event_result_destination(self.track_index, is_clear(self.health))
         self.track_index = next_track
         try:
             save_progress(
                 self.progress_path, self.track_index, EVENT_TRACK_COUNT, self.track_scores, self.track_names,
+                getattr(self, "track_ranks", None),
             )
         except OSError as error:
             self._print(f"progress save failed: {error}")
@@ -781,6 +802,7 @@ class MinigameFlowMixin:
 
     def show_total_result(self):
         self.scene = "total_result"
+        self.extra_challenge_prompt = False
         self.total_result_count_started = False
         self.total_result_count_finished = False
         self.total_result_count_channel = None
@@ -791,6 +813,48 @@ class MinigameFlowMixin:
         self.root.after(80, lambda: self._play_scene_audio("total_result", "total_result.mp3", loop=True, fade_ms=300))
         self.root.after(180, lambda: self._play_sfx("card_show.wav") if self.scene == "total_result" else None)
         self._print(f"total result visible, total score: {sum(self.track_scores)}")
+
+    def _extra_challenge_available(self):
+        ranks = getattr(self, "track_ranks", ())
+        return (
+            not getattr(self, "extra_stage_active", False)
+            and len(ranks) == EVENT_TRACK_COUNT
+            and all(rank in ("S", "X") for rank in ranks)
+            and any(getattr(self, "extra_charts_by_mode", {}).values())
+        )
+
+    def _accept_extra_challenge(self):
+        if (
+            self.scene != "result" or self.loading_phase is not None
+            or not self.extra_challenge_prompt or self.extra_challenge_started is None
+            or time.monotonic() < self.result_unlock_at
+        ):
+            return
+        self.extra_challenge_prompt = False
+        self._stop_result_rank_audio()
+        self.track_index = 0
+        try:
+            save_progress(
+                self.progress_path, self.track_index, EVENT_TRACK_COUNT,
+                self.track_scores, self.track_names, self.track_ranks,
+            )
+        except OSError as error:
+            self._print(f"progress save failed: {error}")
+        self._play_sfx("ok.wav")
+        self.audio.stop(480)
+        self._start_loading("select", self._show_extra_select)
+
+    def _show_extra_select(self):
+        mode = self.game_mode
+        if not self.extra_charts_by_mode[mode]:
+            mode = next(mode for mode in ("2k", "4k", "catch") if self.extra_charts_by_mode[mode])
+        self.extra_stage_active = True
+        self.game_mode = mode
+        self.mode_index = ("2k", "4k", "catch").index(mode)
+        self.charts = self.extra_charts_by_mode[mode]
+        self.song_groups = group_charts_by_song(self.charts)
+        self._reset_selection()
+        self.show_select()
 
     def start_total_result_transition(self):
         if self.scene != "total_result" or self.loading_phase is not None:
@@ -828,6 +892,8 @@ class MinigameFlowMixin:
         return self.track_index + 1
 
     def _track_key(self):
+        if getattr(self, "extra_stage_active", False):
+            return "EXTRA"
         position = self._track_position()
         if position == EVENT_TRACK_COUNT:
             return "FINAL"

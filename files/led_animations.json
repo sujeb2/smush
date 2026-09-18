@@ -15,12 +15,12 @@
         }
       ],
       "neopixel": {
-        "mode": "off",
+        "mode": "solid",
         "speed": 1.0,
         "brightness": 0.15,
         "pulse_fraction": 0.65,
         "offset_ms": 0.0,
-        "high_health": true,
+        "high_health": false,
         "colors": [
           "#46AAFF",
           "#FFFFFF",
@@ -47,17 +47,17 @@
         }
       ],
       "neopixel": {
-        "mode": "off",
+        "mode": "solid",
         "speed": 1.0,
         "brightness": 0.15,
         "pulse_fraction": 0.65,
         "offset_ms": 0.0,
-        "high_health": true,
+        "high_health": false,
         "colors": [
-          "#46AAFF",
-          "#FFFFFF",
-          "#46AAFF",
-          "#FFFFFF"
+          "#FF000A",
+          "#FF000A",
+          "#FF000A",
+          "#FF000A"
         ],
         "right_colors": [
           "#FFAA00",
@@ -133,17 +133,17 @@
         }
       ],
       "neopixel": {
-        "mode": "rainbow",
-        "speed": 0.5,
+        "mode": "beat",
+        "speed": 1.0,
         "brightness": 1.0,
         "pulse_fraction": 0.65,
         "offset_ms": 0.0,
-        "high_health": true,
+        "high_health": false,
         "colors": [
-          "#46AAFF",
-          "#FFFFFF",
-          "#46AAFF",
-          "#FFFFFF"
+          "#FF00EE",
+          "#FF5EFB",
+          "#FF00F1",
+          "#FF8DF6"
         ],
         "right_colors": [
           "#FFAA00",
@@ -214,9 +214,9 @@
         "high_health": false,
         "colors": [
           "#FF1600",
-          "#FF294E",
-          "#FF374F",
-          "#FF5460"
+          "#FF0008",
+          "#FF000A",
+          "#FF0008"
         ],
         "right_colors": [
           "#FFAA00",
@@ -247,7 +247,7 @@
         }
       ],
       "neopixel": {
-        "mode": "solid",
+        "mode": "rainbow",
         "speed": 1.0,
         "brightness": 1.0,
         "pulse_fraction": 0.65,
@@ -327,10 +327,10 @@
         "offset_ms": 0.0,
         "high_health": false,
         "colors": [
-          "#46AAFF",
-          "#FFFFFF",
-          "#46AAFF",
-          "#FFFFFF"
+          "#ADFF00",
+          "#FFB100",
+          "#00D9FF",
+          "#FFB200"
         ],
         "right_colors": [
           "#FFAA00",
@@ -399,7 +399,7 @@
       "neopixel": {
         "mode": "rainbow",
         "speed": 1.0,
-        "brightness": 0.15,
+        "brightness": 1.0,
         "pulse_fraction": 0.65,
         "offset_ms": 0.0,
         "high_health": true,
@@ -431,19 +431,19 @@
       "neopixel": {
         "mode": "beat",
         "speed": 1.0,
-        "brightness": 0.15,
+        "brightness": 1.0,
         "pulse_fraction": 0.65,
         "offset_ms": 0.0,
-        "high_health": true,
+        "high_health": false,
         "colors": [
-          "#46AAFF",
-          "#FFFFFF",
-          "#46AAFF",
-          "#FFFFFF"
+          "#FEFDFF",
+          "#14C9FF",
+          "#FCFFFC",
+          "#00B8FF"
         ],
         "right_colors": [
-          "#FFAA00",
-          "#FF4400"
+          "#FB00FF",
+          "#FF00F4"
         ]
       }
     },
@@ -489,11 +489,11 @@
       ],
       "neopixel": {
         "mode": "beat",
-        "speed": 1.0,
-        "brightness": 0.15,
+        "speed": 2.0,
+        "brightness": 0.5,
         "pulse_fraction": 0.65,
         "offset_ms": 0.0,
-        "high_health": true,
+        "high_health": false,
         "colors": [
           "#46AAFF",
           "#FFFFFF",
@@ -531,7 +531,7 @@
       "neopixel": {
         "mode": "rainbow",
         "speed": 1.0,
-        "brightness": 0.15,
+        "brightness": 1.0,
         "pulse_fraction": 0.65,
         "offset_ms": 0.0,
         "high_health": false,
@@ -572,10 +572,10 @@
       "neopixel": {
         "mode": "solid",
         "speed": 1.0,
-        "brightness": 0.15,
+        "brightness": 1.0,
         "pulse_fraction": 0.65,
         "offset_ms": 0.0,
-        "high_health": true,
+        "high_health": false,
         "colors": [
           "#46AAFF",
           "#FFFFFF",
@@ -613,10 +613,10 @@
       "neopixel": {
         "mode": "rainbow",
         "speed": 1.0,
-        "brightness": 0.15,
+        "brightness": 1.0,
         "pulse_fraction": 0.65,
         "offset_ms": 0.0,
-        "high_health": true,
+        "high_health": false,
         "colors": [
           "#46AAFF",
           "#FFFFFF",
@@ -632,6 +632,6 @@
   },
   "neopixel": {
     "enabled": true,
-    "preview_bpm": 120.0
+    "preview_bpm": 150.0
   }
 }

@@ -4,6 +4,7 @@ import os
 import queue
 import re
 import tempfile
+import time
 from dataclasses import dataclass
 
 from ui_framework import CanvasUIFramework, DESIGN_HEIGHT, DESIGN_WIDTH, find_compiled_dir
@@ -293,24 +294,26 @@ class TestModeUI(CanvasUIFramework):
             self.serial_status = "ARDUINO NOT CONNECTED"
             return False
         try:
-            self.serial.set_switch_led(index + 1, enabled)
+            states = self.led_states.copy()
+            states[index] = enabled
+            self.serial.set_led_frame((False,) * 4,
+                                      tuple((32, 32, 32) if on else (0, 0, 0) for on in states))
+            self.led_refresh_at = time.monotonic() + .5
         except Exception as error:
             self.serial_status = f"LED COMMAND FAILED: {error}"
             return False
         self.led_states[index] = enabled
         state = "ON" if enabled else "OFF"
-        self.serial_status = f"SW{index + 1} LED {state}"
+        self.serial_status = f"NEOPIXEL {index + 1} {state}"
         return True
 
     def _turn_off_all_leds(self):
-        for index in range(LED_COUNT):
-            if self.serial is not None:
-                try:
-                    self.serial.set_switch_led(index + 1, False)
-                except Exception as error:
-                    self.serial_status = f"LED COMMAND FAILED: {error}"
-                    break
-            self.led_states[index] = False
+        if self.serial is not None:
+            try:
+                self.serial.set_led_frame((False,) * 4, ((0, 0, 0),) * LED_COUNT)
+            except Exception as error:
+                self.serial_status = f"LED COMMAND FAILED: {error}"
+        self.led_states = [False] * LED_COUNT
 
     def close(self):
         if not self.running:
@@ -408,7 +411,7 @@ class TestModeUI(CanvasUIFramework):
         self._place_text(instruction, 540, 1815, 19)
 
     def _build_led_test_menu(self):
-        self._build_header("BUTTON LED TEST")
+        self._build_header("NEOPIXEL TEST")
         start_y = 650
         spacing = 120
         for index, enabled in enumerate(self.led_states):
@@ -416,7 +419,7 @@ class TestModeUI(CanvasUIFramework):
             color = self.settings["selected"] if selected else self.settings["text"]
             state = "ON" if enabled else "OFF"
             state_color = self.settings["selected"] if enabled else self.settings["disabled"]
-            self._place_text(f"SW{index + 1} LED", 250, start_y + index * spacing, 32, color, anchor="w")
+            self._place_text(f"NEOPIXEL {index + 1}", 250, start_y + index * spacing, 32, color, anchor="w")
             self._place_text(state, 830, start_y + index * spacing, 32, state_color, anchor="e")
         self._place_text("UP / DOWN : SELECT, ENTER : TOGGLE, LEFT : ALL OFF + BACK", 540, 1815, 19)
 
@@ -443,6 +446,8 @@ class TestModeUI(CanvasUIFramework):
             return
         if self.serial is not None:
             try:
+                if self.level == "led_test" and time.monotonic() >= getattr(self, "led_refresh_at", 0):
+                    self._set_led(self.led_test_index, self.led_states[self.led_test_index])
                 while self.serial.in_waiting > 0:
                     message = self.serial.read()
                     if message is not None:

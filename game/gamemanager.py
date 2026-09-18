@@ -3,20 +3,31 @@ import time
 
 from PIL import Image, ImageDraw
 
-from game.rules import (
-    BAD_WINDOW,
-    GOOD_WINDOW,
-    HEALTH_CHANGE,
-    HIT_WINDOW,
-    PERFECT_WINDOW,
-    calculate_catch_score,
-    calculate_score,
-    combo_after_judgement,
-    hold_tick_times,
-)
+from game.rules import BAD_WINDOW
+from game.session import GameSession, session_field
 
 
 class MinigameGameplayMixin:
+    # Transitional accessors keep existing scenes working without duplicate state.
+    resolved_notes = session_field("resolved_notes")
+    judgements = session_field("judgements")
+    counts = session_field("counts")
+    health = session_field("health")
+    score = session_field("score")
+    combo = session_field("combo")
+    max_combo = session_field("max_combo")
+    active_holds = session_field("active_holds")
+
+    @property
+    def gameplay(self):
+        if not hasattr(self, "_gameplay"):
+            self._gameplay = GameSession()
+        return self._gameplay
+
+    @gameplay.setter
+    def gameplay(self, session):
+        self._gameplay = session
+
     def _autoplay_active(self):
         return self.scene == "demonstration" or getattr(self, "debug_autoplay", False)
 
@@ -65,10 +76,43 @@ class MinigameGameplayMixin:
     def _move_catcher(self, lane):
         now = time.monotonic()
         self._animate_catcher(now)
+        if self._catch_pot_active(now):
+            return
         direction = -1 if lane == 0 else 1
         self.catcher_velocity = min(920.0, max(-920.0, self.catcher_velocity + direction * 520.0))
 
+    def _set_catch_potentiometer(self, value):
+        if type(value) is not int or not 0 <= value <= 1023:
+            return
+        now = time.monotonic()
+        previous = getattr(self, "catch_pot_value", None)
+        received = getattr(self, "catch_pot_received_at", None)
+        if (previous is None or received is None or now - received > 1.0
+                or abs(value - previous) >= 4 or value in (0, 1023)):
+            self.catch_pot_value = value
+        self.catch_pot_received_at = now
+
+    def _catch_pot_active(self, now):
+        received = getattr(self, "catch_pot_received_at", None)
+        return (getattr(self, "scene", None) == "game"
+                and getattr(self, "game_mode", None) == "catch"
+                and not self._autoplay_active()
+                and getattr(self, "catch_pot_value", None) is not None
+                and received is not None and now - received <= 1.0)
+
     def _animate_catcher(self, now):
+        if self._catch_pot_active(now):
+            target = 180.0 + self.catch_pot_value / 1023.0 * 720.0
+            delta = min(.05, max(0.0, now - self.catcher_last_update)) if self.catcher_last_update is not None else 0.0
+            # Frame-rate-independent smoothing: 95% settled after roughly 90 ms.
+            self.catcher_x += (target - self.catcher_x) * -math.expm1(-delta / .03)
+            if abs(target - self.catcher_x) < .25:
+                self.catcher_x = target
+            self.catcher_velocity = 0.0
+            self.catcher_last_update = now
+            if self.catcher_item is not None:
+                self.canvas.coords(self.catcher_item, self._x(self.catcher_x), self._y(1725))
+            return
         if self.catcher_last_update is None:
             self.catcher_last_update = now
             return
@@ -135,24 +179,17 @@ class MinigameGameplayMixin:
                 self.catch_bursts.remove(burst)
 
     def _resolve_catch(self, index, caught):
-        if index in self.resolved_notes:
+        previous_health = self.gameplay.resolve_catch(index, caught, len(self.track.notes))
+        if previous_health is None:
             return
-        self.resolved_notes.add(index)
-        judgement = "catch" if caught else "miss"
-        self.judgements.append(judgement)
-        self.counts[judgement] += 1
-        previous_health = self.health
         if caught:
             self._play_sfx("hitsound.wav", volume=0.45)
-            self.health = min(100.0, self.health + 0.55)
-            self._advance_combo()
+            self._show_combo()
             if self.counts["catch"] % 5 == 0:
                 note = self.track.notes[index]
                 self._start_catch_burst(90.0 + note.x / 512.0 * 900.0, 1625.0)
         else:
-            self.health = max(0.0, self.health - 7.0)
-            self._break_combo()
-        self.score = calculate_catch_score(self.counts["catch"], len(self.track.notes))
+            self._hide_combo()
         item = self.note_items.pop(index, None)
         if item is not None:
             self.canvas.delete(item)
@@ -165,41 +202,21 @@ class MinigameGameplayMixin:
     def _judge(self, lane):
         if self.game_started is None:
             return
-        elapsed = self._game_elapsed()
-        candidates = [
-            (abs(note.time - elapsed), index)
-            for index, note in enumerate(self.track.notes)
-            if index not in self.resolved_notes and note.lane == lane and abs(note.time - elapsed) <= HIT_WINDOW
-        ]
-        if not candidates:
-            return
-        difference, index = min(candidates)
-        if difference <= PERFECT_WINDOW:
-            judgement = "perfect"
-        elif difference <= GOOD_WINDOW:
-            judgement = "good"
-        else:
-            judgement = "bad"
-        self._resolve_note(index, judgement)
+        result = self.gameplay.judge(self.track.notes, lane, self._game_elapsed())
+        if result is not None:
+            self._resolve_note(*result)
 
     def _resolve_note(self, index, judgement):
-        if index in self.resolved_notes:
+        previous_health = self.gameplay.resolve_note(
+            index, self.track.notes[index], judgement, len(self.track.notes), self._game_elapsed(),
+        )
+        if previous_health is None:
             return
-        self.resolved_notes.add(index)
-        self.judgements.append(judgement)
-        self.counts[judgement] += 1
-        previous_health = self.health
-        self.health = min(100.0, max(0.0, self.health + HEALTH_CHANGE[judgement]))
-        self.score = calculate_score(self.judgements, len(self.track.notes))
         if judgement == "miss":
-            self._break_combo()
+            self._hide_combo()
         else:
             self._play_sfx("hitsound.wav", volume=0.45)
-            self._advance_combo()
-            note = self.track.notes[index]
-            ticks = tuple(tick for tick in hold_tick_times(note.time, note.end_time) if tick > self._game_elapsed())
-            if ticks:
-                self.active_holds[index] = {"ticks": ticks, "next": 0, "end_time": note.end_time}
+            self._show_combo()
         self.last_feedback = judgement
         self.feedback_started = time.monotonic()
         self.feedback_until = self.feedback_started + 0.58
@@ -211,9 +228,7 @@ class MinigameGameplayMixin:
             self.canvas.itemconfigure(self.judgement_item, image=self.judgement_frames[self.last_feedback][0])
             self.feedback_visible = True
 
-    def _advance_combo(self):
-        self.combo = combo_after_judgement(self.combo, "perfect")
-        self.max_combo = max(self.max_combo, self.combo)
+    def _show_combo(self):
         self.combo_animation_started = time.monotonic()
         self.combo_frame_shown = -1
         self.combo_photo_cache.clear()
@@ -222,8 +237,7 @@ class MinigameGameplayMixin:
         elif self.combo_item is not None:
             self.canvas.itemconfigure(self.combo_item, image=self._combo_photo(self.combo, 70))
 
-    def _break_combo(self):
-        self.combo = 0
+    def _hide_combo(self):
         self.combo_animation_started = None
         self.combo_frame_shown = -1
         self.combo_photo_cache.clear()
@@ -348,17 +362,10 @@ class MinigameGameplayMixin:
         self.canvas.itemconfigure(self.health_fill_item, image=self.health_dynamic_photo)
 
     def _update_hold_ticks(self, elapsed):
-        for index, state in tuple(self.active_holds.items()):
-            ticks = state["ticks"]
-            while state["next"] < len(ticks) and elapsed >= ticks[state["next"]]:
-                state["next"] += 1
-                self._play_sfx("hitsound.wav", volume=0.45)
-                previous_health = self.health
-                self.health = min(100.0, self.health + 0.08)
-                self._advance_combo()
-                self._start_health_animation(previous_health, self.health)
-            if elapsed > state["end_time"] + BAD_WINDOW:
-                self.active_holds.pop(index, None)
+        for previous_health in self.gameplay.advance_holds(elapsed):
+            self._play_sfx("hitsound.wav", volume=0.45)
+            self._show_combo()
+            self._start_health_animation(previous_health, self.health)
 
     def _update_feedback_image(self):
         if self.judgement_item is None or not self.feedback_visible:

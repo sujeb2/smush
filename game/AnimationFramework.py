@@ -470,6 +470,7 @@ class MinigameAnimationMixin:
             self._animate_demonstration(now)
         elif self.scene == "result":
             self._animate_result(now)
+            self._animate_extra_challenge_prompt(now)
             remaining = max(0, int(self.result_deadline - now + 0.999))
             self._update_timer(self.result_time_item, remaining, "result_time_shown")
             if (
@@ -488,7 +489,7 @@ class MinigameAnimationMixin:
         self.root.after(16, self._animate)
 
     def _consume_serial(self, message):
-        self.serial_buffer += message.lower().replace("\r", "").replace("\n", "")
+        self.serial_buffer += message.lower().replace("\r", "\n")
         self.serial_buffer_updated_at = time.monotonic()
         self._drain_serial_buffer()
 
@@ -497,6 +498,8 @@ class MinigameAnimationMixin:
             (command, action) for command, action in (
                 (self.settings["button_1"], 0), (self.settings["button_2"], 1),
                 (self.settings["button_3"], 2), (self.settings["button_4"], 3),
+                ("btn1", 0), ("btn2", 1),
+                ("pot:", "pot"),
                 (self.settings["coin_message"], "coin"),
             )
             if command
@@ -506,6 +509,9 @@ class MinigameAnimationMixin:
             self.serial_buffer = ""
             return
         while self.serial_buffer:
+            self.serial_buffer = self.serial_buffer.lstrip("\n")
+            if not self.serial_buffer:
+                break
             matches = [
                 (self.serial_buffer.find(command), action, command) for command, action in entries
             ]
@@ -515,8 +521,26 @@ class MinigameAnimationMixin:
                 return
             position, action, command = min(matches, key=lambda match: (match[0], -len(match[2])))
             end = position + len(command)
+            if action == "pot":
+                payload = self.serial_buffer[end:]
+                if len(payload) < 5 and all(c in "0123456789" for c in payload):
+                    # Even a forced legacy-button flush must not accept half a value.
+                    self.serial_buffer = self.serial_buffer[position:]
+                    return
+                if (len(payload) >= 5 and payload[4] == ";"
+                        and all(c in "0123456789" for c in payload[:4])):
+                    value = int(payload[:4])
+                    if value <= 1023:
+                        self._set_catch_potentiometer(value)
+                    self.serial_buffer = payload[5:]
+                else:
+                    self.serial_buffer = payload
+                continue
             longer_possible = any(candidate.startswith(command) and len(candidate) > len(command) for candidate in commands)
-            if not force and end == len(self.serial_buffer) and longer_possible:
+            if not force and longer_possible and any(
+                candidate.startswith(self.serial_buffer[position:])
+                for candidate in commands if len(candidate) > len(command)
+            ):
                 return
             self.serial_buffer = self.serial_buffer[end:]
             if action == "coin":
@@ -566,7 +590,7 @@ class MinigameAnimationMixin:
         self._show_serial_failure()
 
     def _poll_serial(self):
-        if not self.running:
+        if not self.running or self.unrecoverable_error:
             return
         if self.serial is not None:
             try:
@@ -584,5 +608,3 @@ class MinigameAnimationMixin:
                 except Exception:
                     pass
                 self._mark_serial_failed(error)
-        if not self.unrecoverable_error:
-            self.root.after(25, self._poll_serial)

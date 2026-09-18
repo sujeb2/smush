@@ -114,7 +114,7 @@ class LedOutput:
 
     def submit(self, serial, states, pixels=None):
         with self.condition:
-            self.pending = serial, states, pixels
+            self.pending = serial, (False,) * 4, pixels
             self.condition.notify()
 
     def close(self):
@@ -147,10 +147,6 @@ class LedOutput:
                         if states != previous or frame != previous_pixels or time.monotonic() - sent_at >= .5 or closing:
                             target.set_led_frame(states, frame)
                             sent_at = time.monotonic()
-                    else:
-                        for index, enabled in enumerate(states):
-                            if previous is None or enabled != previous[index]:
-                                target.set_switch_led(index + 1, enabled)
                     previous = states
                     previous_pixels = pixels
                 except Exception as error:

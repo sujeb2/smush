@@ -456,6 +456,7 @@ class PygameRoot:
                             callback = self.bindings.get("<KeyPress>")
                             if callback is not None:
                                 callback(SimpleNamespace(keysym=keysym))
+                    self.framework.poll_input()
                     self._run_jobs()
                     if not self.framework.running:
                         break
@@ -544,6 +545,10 @@ class ModernGLUIFramework:
 
     def run(self):
         self.root.mainloop()
+
+    def poll_input(self):
+        """Hook for hardware input, serviced before simulation and rendering."""
+        pass
 
     def close(self):
         if not self.running:

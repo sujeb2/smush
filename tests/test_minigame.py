@@ -57,10 +57,10 @@ class ScoreTests(unittest.TestCase):
 
     def test_score_uses_chart_note_count(self):
         judgements = ["perfect", "good", "bad", "miss"]
-        self.assertEqual(calculate_score(judgements, 4), 4275)
+        self.assertEqual(calculate_score(judgements, 4), round(MAX_SCORE * .475))
 
     def test_catch_score_uses_chart_object_count(self):
-        self.assertEqual(calculate_catch_score(113, 226), 4500)
+        self.assertEqual(calculate_catch_score(113, 226), MAX_SCORE // 2)
         self.assertEqual(calculate_catch_score(226, 226), MAX_SCORE)
 
     def test_clear_requires_five_percent_health(self):
@@ -104,7 +104,7 @@ class ScoreTests(unittest.TestCase):
         game.track = SimpleNamespace(notes=tuple(ChartNote(float(index), 0) for index in range(6)))
         for index in range(5):
             game._resolve_catch(index, True)
-        self.assertEqual((game.combo, game.score, game.counts["catch"]), (5, 7500, 5))
+        self.assertEqual((game.combo, game.score, game.counts["catch"]), (5, round(MAX_SCORE * 5 / 6), 5))
         self.assertEqual(len(bursts), 1)
         self.assertEqual(hitsounds, [("hitsound.wav", 0.45)] * 5)
         game._resolve_catch(5, False)
@@ -137,7 +137,7 @@ class ScoreTests(unittest.TestCase):
         game._resolve_note(0, "perfect")
         game._update_hold_ticks(0.25)
         game._resolve_note(1, "miss")
-        self.assertEqual(hitsounds, [("hitsound.wav", 0.45), ("hitsound.wav", 0.62)])
+        self.assertEqual(hitsounds, [("hitsound.wav", 0.45), ("hitsound.wav", 0.45)])
 
     def test_catcher_uses_momentum_instead_of_fixed_steps(self):
         positions = []
@@ -369,7 +369,7 @@ class OsuChartTests(unittest.TestCase):
         charts, rejected = discover_osu_mania_2k(os.path.join("game", "charts", "sample-chart"))
         self.assertEqual(len(charts), 1)
         self.assertEqual(len(rejected), 1)
-        self.assertEqual(charts[0].difficulty, "Learn 2 Alternate!")
+        self.assertEqual(charts[0].circle_size, 2)
 
     def test_v126_catch_chart_uses_horizontal_hit_object_position(self):
         path = os.path.join(self.directory.name, "catch.osu")
@@ -487,8 +487,8 @@ class RefactorTests(unittest.TestCase):
         self.assertEqual(
             messages,
             [
-                "debug autoplay enabled for 2K, 4K, and catch",
-                "debug autoplay disabled for 2K, 4K, and catch",
+                "debug autoplay enabled",
+                "debug autoplay disabled",
             ],
         )
 
@@ -726,9 +726,9 @@ class RefactorTests(unittest.TestCase):
         }
         game.press_button = pressed.append
         game._insert_coin = lambda: coins.append(True)
-        game.serial_buffer = "sw1sw2sw3sw4coin"
+        game.serial_buffer = "sw1sw2sw3sw4coinbtn1btn2"
         game._drain_serial_buffer(force=True)
-        self.assertEqual(pressed, [0, 1, 2, 3])
+        self.assertEqual(pressed, [0, 1, 2, 3, 0, 1])
         self.assertEqual(coins, [True])
 
     def test_serial_failure_banner_is_placed_below_title_prompt(self):

@@ -36,21 +36,13 @@ class LedTests(unittest.TestCase):
                 save(path, invalid)
             self.assertEqual(load(path), data)
 
-    def test_output_deduplicates_and_turns_off_on_close(self):
-        done = threading.Event()
-        calls = []
-        def send(index, enabled):
-            calls.append((index, enabled))
-            if index == 4:
-                done.set()
+    def test_old_button_timelines_never_send_hardware_commands(self):
+        serial = Mock()
         output = LedOutput(self.fail)
-        serial = SimpleNamespace(set_switch_led=send)
-        output.submit(serial, (True,) * 4)
-        self.assertTrue(done.wait(1))
         output.submit(serial, (True,) * 4)
         output.close()
-        self.assertEqual(calls, [(i, True) for i in range(1, 5)] + [(i, False) for i in range(1, 5)])
-        self.assertFalse(output.thread.is_alive())
+        serial.set_switch_led.assert_not_called()
+        serial.set_led_frame.assert_not_called()
 
     def test_runtime_all_scenes_reload_and_demo_preview(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -77,7 +69,7 @@ class LedTests(unittest.TestCase):
                 runtime._toggle_led_preview()
                 runtime._tick_leds()
                 self.assertEqual(runtime.led_scene_key, (scene, index))
-                self.assertEqual(runtime.led_preview_state, (True, False, True, False))
+                self.assertEqual(runtime.led_preview_state, ((0, 0, 0),) * 4)
                 self.assertTrue(runtime.canvas.coords("led_preview"))
                 runtime._toggle_led_preview()
                 runtime._tick_leds()
@@ -91,7 +83,7 @@ class LedTests(unittest.TestCase):
                 self.assertTrue(runtime.canvas.coords("led_preview"))
             runtime.scene = "game"
             runtime._tick_leds()
-            self.assertEqual(runtime.led_preview_state, (True, False, True, False))
+            self.assertEqual(runtime.led_preview_state, ((0, 0, 0),) * 4)
             self.assertTrue(runtime.canvas.coords("led_preview"))
             runtime.serial.set_switch_led.assert_not_called()
             # A scene rebuild must recreate the preview, even for the same LED state.
@@ -107,7 +99,7 @@ class LedTests(unittest.TestCase):
             output = Mock()
             runtime.led_output = output
             runtime._tick_leds()
-            output.submit.assert_called_with(runtime.serial, (True, False, True, False))
+            output.submit.assert_called_with(runtime.serial, (False,) * 4)
             data["scenes"]["game"]["steps"][0]["leds"] = [False] * 4
             save(runtime.led_path, data)
             runtime.led_reload_at = 0

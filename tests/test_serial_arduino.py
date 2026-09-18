@@ -13,27 +13,19 @@ class SerialIOTests(unittest.TestCase):
         self.serial_port.is_open = True
         self.serial_io = SerialIO("TEST", 9600, timeout=1)
 
-    def test_switch_led_command_is_newline_delimited(self):
-        self.serial_io.set_switch_led(1, True)
-        self.serial_io.set_switch_led(4, False)
-
-        self.assertEqual(
-            self.serial_port.write.call_args_list,
-            [
-                unittest.mock.call(b"SW1_ON\n"),
-                unittest.mock.call(b"SW4_OFF\n"),
-            ],
-        )
-
-    def test_switch_number_must_be_one_through_four(self):
-        for switch_number in (0, 5, True):
-            with self.subTest(switch_number=switch_number):
-                with self.assertRaises(ValueError):
-                    self.serial_io.set_switch_led(switch_number, True)
+    def test_neopixel_frame_has_no_button_lamp_output(self):
+        self.serial_io.set_led_frame((True,) * 4, ((255, 0, 0),) * 4)
+        self.serial_port.write.assert_called_once_with(b"LED0:FF0000FF0000FF0000FF0000\n")
+        self.assertFalse(hasattr(self.serial_io, "set_switch_led"))
 
     def test_multiline_command_is_rejected(self):
         with self.assertRaises(ValueError):
             self.serial_io.write_command("SW1_ON\nSW2_ON")
+
+    def test_reads_preserve_framing_for_immediate_input(self):
+        self.serial_port.in_waiting = 11
+        self.serial_port.read.return_value = b"Forwarded\r\n"
+        self.assertEqual(self.serial_io.read(), "Forwarded\r\n")
 
 
 if __name__ == "__main__":

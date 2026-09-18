@@ -2,6 +2,7 @@ import queue
 import time
 
 from game.rules import JUDGEMENT_WEIGHT
+from game.session import GameSession
 
 
 class MinigameStateMixin:
@@ -115,22 +116,15 @@ class MinigameStateMixin:
         self.chart_video_fps = {}
 
     def _initialize_gameplay_state(self):
+        self.gameplay = GameSession()
         self.game_started = None
         self.game_audio_started = False
         self.game_audio_offset = 0.0
         self.game_audio_job = None
         self.game_finishing = False
         self.debug_autoplay = False
-        self.resolved_notes = set()
         self.note_items = {}
-        self.judgements = []
-        self.counts = {key: 0 for key in JUDGEMENT_WEIGHT}
-        self.health = 100.0
         self.display_health = 100.0
-        self.score = 0
-        self.combo = 0
-        self.max_combo = 0
-        self.active_holds = {}
         self.combo_label_item = None
         self.combo_item = None
         self.combo_frame_shown = -1
@@ -151,6 +145,8 @@ class MinigameStateMixin:
         self.judgement_frames = {}
         self.catcher_x = 540.0
         self.catcher_velocity = 0.0
+        self.catch_pot_value = None
+        self.catch_pot_received_at = None
         self.catcher_last_update = None
         self.catcher_item = None
         self.catch_combo_item = None

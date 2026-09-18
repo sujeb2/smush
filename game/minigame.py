@@ -10,7 +10,7 @@ from game.gameflow import MinigameFlowMixin
 from game.scenes import MinigameGameSceneMixin
 from game.gamemanager import MinigameGameplayMixin
 from game.mediaplayer import MinigameMediaMixin
-from game.persistence import load_event_results, load_progress, save_progress
+from game.persistence import load_event_results, load_event_ranks, load_progress, save_progress
 from game.PreloadManager import MinigamePreloadMixin
 from game.rules import (
     BAD_WINDOW,
@@ -60,7 +60,11 @@ class MinigameUI(
         self.settings = self._load_settings(config_path)
         super().__init__("SMUSH MINIGAME", fullscreen=fullscreen)
         charts_root = os.path.join(self.base, self.settings["charts_root"])
-        self.charts_by_mode, rejected = discover_osu_supported(charts_root, self.settings["event_chart_folders"])
+        self.charts_by_mode, rejected = discover_osu_supported(
+            charts_root, self.settings["event_chart_folders"], excluded_folders=("extrastage",),
+        )
+        self.extra_charts_by_mode, extra_rejected = discover_osu_supported(os.path.join(charts_root, "extrastage"))
+        rejected += extra_rejected
         for path, reason in rejected:
             self._print(f"[ChartManager] chart skipped: {os.path.basename(path)} ({reason})")
         if not any(self.charts_by_mode.values()):
@@ -73,6 +77,9 @@ class MinigameUI(
         self.progress_path = progress_path or os.path.join(self.base, self.settings["progress_file"])
         self.track_index = load_progress(self.progress_path, EVENT_TRACK_COUNT)
         self.track_scores, self.track_names = load_event_results(self.progress_path, EVENT_TRACK_COUNT)
+        self.track_ranks = load_event_ranks(self.progress_path, EVENT_TRACK_COUNT)
+        self.extra_stage_active = False
+        self.extra_challenge_prompt = False
         self.test_mode_callback = test_mode_callback
         self.coins_per_credit = self.settings["coins_per_credit"]
         self.coin_count = max(0, self.settings["initial_coin_count"])
@@ -87,7 +94,10 @@ class MinigameUI(
         self.root.bind("<KeyPress>", self._handle_key)
         self.root.after(0, self.show_preload)
         self.root.after(16, self._animate)
-        self.root.after(25, self._poll_serial)
+
+    def poll_input(self):
+        # Called before scheduled animation/judgement jobs on every frame.
+        self._poll_serial()
 
     def _load_settings(self, path):
         parser = configparser.ConfigParser()

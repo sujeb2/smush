@@ -172,7 +172,7 @@ class PixelOutputTests(unittest.TestCase):
             serial = SerialIO("test", 9600, 1)
             pixels = ((255, 0, 0), (0, 255, 0), (0, 0, 255), (1, 2, 3))
             serial.set_led_frame((True, False, True, False), pixels)
-            port.return_value.write.assert_called_once_with(b"LED5:FF000000FF000000FF010203\n")
+            port.return_value.write.assert_called_once_with(b"LED0:FF000000FF000000FF010203\n")
             with self.assertRaises(ValueError):
                 serial.set_led_frame((False,) * 4, ((256, 0, 0),) * 4)
 
@@ -187,11 +187,11 @@ class PixelOutputTests(unittest.TestCase):
         output.close()
         self.assertFalse(output.thread.is_alive())
         self.assertEqual(serial.set_led_frame.call_args_list,
-                         [unittest.mock.call((True,) * 4, pixels),
+                         [unittest.mock.call((False,) * 4, pixels),
                           unittest.mock.call((False,) * 4, neopixel.BLACK)])
         serial.set_switch_led.assert_not_called()
 
-    def test_disabling_pixels_clears_them_and_resumes_button_commands(self):
+    def test_disabling_pixels_clears_them_without_button_commands(self):
         sent = threading.Event()
         serial = Mock()
         serial.set_led_frame.side_effect = lambda *args: sent.set()
@@ -206,8 +206,8 @@ class PixelOutputTests(unittest.TestCase):
             serial.set_led_frame.assert_called_with((False,) * 4, neopixel.BLACK)
             sent.clear()
             output.submit(serial, (True, False, False, False))
-            self.assertTrue(sent.wait(1))
-            serial.set_switch_led.assert_called_once_with(1, True)
+            output.close()
+            serial.set_switch_led.assert_not_called()
         finally:
             output.close()
 

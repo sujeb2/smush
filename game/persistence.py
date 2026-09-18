@@ -32,7 +32,19 @@ def load_event_results(path, track_count):
     return scores, names
 
 
-def save_progress(path, track_index, track_count, track_scores=None, track_names=None):
+def load_event_ranks(path, track_count):
+    ranks = [""] * max(0, track_count)
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            stored = json.load(file).get("track_ranks", [])
+        for index, rank in enumerate(stored[:track_count]):
+            ranks[index] = rank if rank in ("X", "S", "A", "B", "C", "D") else ""
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return ranks
+
+
+def save_progress(path, track_index, track_count, track_scores=None, track_names=None, track_ranks=None):
     if track_count <= 0:
         return
     directory = os.path.dirname(path)
@@ -50,6 +62,8 @@ def save_progress(path, track_index, track_count, track_scores=None, track_names
         payload["track_scores"] = [min(MAX_SCORE, max(0, int(value))) for value in track_scores[:track_count]]
     if track_names is not None:
         payload["track_names"] = [str(value) for value in track_names[:track_count]]
+    if track_ranks is not None:
+        payload["track_ranks"] = list(track_ranks[:track_count])
     temporary_path = f"{path}.tmp"
     with open(temporary_path, "w", encoding="utf-8") as file:
         json.dump(payload, file)

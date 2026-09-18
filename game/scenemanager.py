@@ -223,7 +223,8 @@ class MinigameSceneMixin:
         self._text_image("VER 1.0-E", 22, 975, 34, anchor="ne", tags=("header",))
         self._image("network", 995, 18, anchor="ne", tags=("header",))
         self._text_image(
-            f"{self.settings['mode']} MODE [{self._track_position()}/{EVENT_TRACK_COUNT}]",
+            (f"{self.settings['mode']} MODE [EXTRA]" if getattr(self, "extra_stage_active", False)
+             else f"{self.settings['mode']} MODE [{self._track_position()}/{EVENT_TRACK_COUNT}]"),
             22, 1018, 74, anchor="ne", tags=("header",),
         )
         self.credit_item = self._text_image(

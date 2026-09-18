@@ -13,6 +13,7 @@ IMAGE_PATHS = {
     "entry_cancel": ("generic", "entry_cancel.png"),
     "entry_guest": ("generic", "entry_guest.png"),
     "warning": ("generic", "warn.png"),
+    "information": ("generic", "information.png"),
     "gameengine": ("generic", "gameengine.png"),
     "produced": ("generic", "produced.png"),
     "epilepsywarning": ("generic", "epilepsywarning.png"),

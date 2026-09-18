@@ -2,7 +2,7 @@ import os
 import time
 from bisect import bisect_right
 
-from game.led import LedOutput, defaults, load, render_preview, sample
+from game.led import LedOutput, defaults, load
 from game import neopixel
 
 
@@ -66,7 +66,7 @@ class LedRuntimeMixin:
         if key != self.led_scene_key:
             self.led_scene_key, self.led_started = key, now
         animation = self.led_data["scenes"].get(self.scene)
-        states = sample(animation, now - self.led_started) if animation else (False,) * 4
+        states = (False,) * 4  # Reserved mask: physical button lamps were removed.
         pixels = None
         if self.led_data["neopixel"]["enabled"]:
             seconds, points = now - self.led_started, ()
@@ -87,15 +87,12 @@ class LedRuntimeMixin:
                 self.led_output.submit(self.serial, states, pixels)
         show = self.demo_mode and self.led_preview_visible
         if show: # scene clear
-            preview_state = (states, pixels) if pixels is not None else states
+            preview_state = pixels if pixels is not None else neopixel.BLACK
             if preview_state != self.led_preview_state or not self.canvas.coords("led_preview"):
                 self.canvas.delete("led_preview")
-                self.led_preview_photo = render_preview(states)
+                self.led_preview_photo = neopixel.render_preview(preview_state)
                 self.canvas.create_image(self._x(540), self._y(420), image=self.led_preview_photo,
                                          anchor="center", tags=("led_preview",))
-                if pixels is not None:
-                    self.canvas.create_image(self._x(540), self._y(550), image=neopixel.render_preview(pixels),
-                                             anchor="center", tags=("led_preview",))
                 self.led_preview_state = preview_state
             self.canvas.tag_raise("led_preview")
         else:

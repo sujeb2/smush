@@ -8,34 +8,66 @@ unsigned long lastPixelFrame = 0;
 bool pixelsActive = false;
 
 const unsigned long SERIAL_BAUD = 9600;
-const unsigned long DEBOUNCE_MS = 25;
+const unsigned long RELEASE_DEBOUNCE_MS = 25;
+const byte CATCH_POT_PIN = A5;
+const unsigned long POT_SAMPLE_MS = 5;
+const unsigned long POT_SEND_MS = 20;
+const unsigned long POT_REFRESH_MS = 250;
+const int POT_DEADBAND = 4;
+unsigned long lastPotSample = 0;
+unsigned long lastPotSentAt = 0;
+int lastPotValue = -1;
+long filteredPotQ8 = -1;
 
-const byte BUTTON_COUNT = 4;
-const byte BUTTON_PINS[BUTTON_COUNT] = {2, 3, 4, 5};
-const byte BUTTON_LED_PINS[BUTTON_COUNT] = {6, 7, 8, 9};
-const byte LED_ON_LEVEL = HIGH;
-const byte LED_OFF_LEVEL = LOW;
+void sendCatchPotentiometer(unsigned long now) {
+  if (now - lastPotSample < POT_SAMPLE_MS) return;
+  lastPotSample = now;
+  int readings[5];
+  for (byte i = 0; i < 5; ++i) {
+    readings[i] = analogRead(CATCH_POT_PIN);
+    for (byte j = i; j > 0 && readings[j] < readings[j - 1]; --j) {
+      const int temporary = readings[j];
+      readings[j] = readings[j - 1];
+      readings[j - 1] = temporary;
+    }
+  }
+  // Median rejects isolated spikes; the temporal filter reduces steady noise.
+  const long sampleQ8 = (long)readings[2] * 256;
+  if (filteredPotQ8 < 0) filteredPotQ8 = sampleQ8;
+  else filteredPotQ8 += (sampleQ8 - filteredPotQ8) / 4;
+  int value = (filteredPotQ8 + 128) / 256;
+  if (value <= POT_DEADBAND) value = 0;
+  if (value >= 1023 - POT_DEADBAND) value = 1023;
+  if (now - lastPotSentAt < POT_SEND_MS) return;
+  const bool changed = lastPotValue < 0 || abs(value - lastPotValue) >= POT_DEADBAND;
+  if (!changed && now - lastPotSentAt < POT_REFRESH_MS) return;
+  if (!changed) value = lastPotValue;  // Heartbeats must not leak sub-threshold noise.
+  // Fixed-width, explicitly terminated: safe across split USB serial reads.
+  char frame[11];
+  snprintf(frame, sizeof(frame), "POT:%04d;", value);
+  Serial.println(frame);
+  lastPotValue = value;
+  lastPotSentAt = now;
+}
+
+const byte BUTTON_COUNT = 6;
+const byte BUTTON_PINS[BUTTON_COUNT] = {2, 3, 4, 5, 6, 7};
 const char *const BUTTON_MESSAGES[BUTTON_COUNT] = {
   "Forwarded",
   "Forwarded_2",
   "Forwarded_3",
-  "Forwarded_4"
+  "Forwarded_4",
+  "BTN1",
+  "BTN2"
 };
 
 byte rawButtonMask = 0;
 byte stableButtonMask = 0;
-unsigned long rawChangedAt = 0;
+unsigned long rawChangedAt[BUTTON_COUNT] = {};
 char serialCommand[40];
 byte serialCommandLength = 0;
 bool discardCommand = false;
 unsigned long lastSerialByte = 0;
-
-void setButtonLed(byte index, bool enabled) {
-  digitalWrite(
-    BUTTON_LED_PINS[index],
-    enabled ? LED_ON_LEVEL : LED_OFF_LEVEL
-  );
-}
 
 int hexDigit(char c) {
   if (c >= '0' && c <= '9') return c - '0';
@@ -56,29 +88,14 @@ void handleSerialCommand(const char *command) {
       if (hi < 0 || lo < 0) return;
       rgb[i] = (hi << 4) | lo;
     }
-    for (byte i = 0; i < BUTTON_COUNT; ++i) {
-      setButtonLed(i, mask & (1 << i));
+    // The legacy mask is reserved/ignored. D6 and D7 are now inputs.
+    for (byte i = 0; i < NEOPIXEL_COUNT; ++i) {
       pixels.setPixelColor(i, rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2]);
     }
     pixels.show();
     lastPixelFrame = millis();
     pixelsActive = true;
     return;
-  }
-  for (byte index = 0; index < BUTTON_COUNT; ++index) {
-    char expectedOn[7];
-    char expectedOff[8];
-    snprintf(expectedOn, sizeof(expectedOn), "SW%u_ON", index + 1);
-    snprintf(expectedOff, sizeof(expectedOff), "SW%u_OFF", index + 1);
-
-    if (strcmp(command, expectedOn) == 0) {
-      setButtonLed(index, true);
-      return;
-    }
-    if (strcmp(command, expectedOff) == 0) {
-      setButtonLed(index, false);
-      return;
-    }
   }
 }
 
@@ -125,19 +142,18 @@ byte readButtonMask() {
 
 void setup() {
   Serial.begin(SERIAL_BAUD);
+  pinMode(CATCH_POT_PIN, INPUT);
   pixels.begin();
   pixels.clear();
   pixels.show();
   for (byte index = 0; index < BUTTON_COUNT; ++index) {
     pinMode(BUTTON_PINS[index], INPUT_PULLUP);
-    pinMode(BUTTON_LED_PINS[index], OUTPUT);
-    setButtonLed(index, false);
+    rawChangedAt[index] = millis();
   }
 
   rawButtonMask = readButtonMask();
   stableButtonMask = rawButtonMask;
-  rawChangedAt = millis();
-  Serial.println("READY:NEOPIXEL4");
+  Serial.println("READY:NEOPIXEL4:BTN6");
 }
 
 void loop() {
@@ -151,22 +167,21 @@ void loop() {
   }
   const byte sampledButtonMask = readButtonMask();
 
-  if (sampledButtonMask != rawButtonMask) {
-    rawButtonMask = sampledButtonMask;
-    rawChangedAt = now;
-  }
-
-  if (
-    rawButtonMask != stableButtonMask
-    && now - rawChangedAt >= DEBOUNCE_MS
-  ) {
-    const byte newlyPressed = rawButtonMask & ~stableButtonMask;
-    stableButtonMask = rawButtonMask;
-
-    for (byte index = 0; index < BUTTON_COUNT; ++index) {
-      if (newlyPressed & (1 << index)) {
-        Serial.println(BUTTON_MESSAGES[index]);
-      }
+  for (byte index = 0; index < BUTTON_COUNT; ++index) {
+    const byte bit = 1 << index;
+    if ((sampledButtonMask ^ rawButtonMask) & bit) {
+      rawButtonMask ^= bit;
+      rawChangedAt[index] = now;
+    }
+    // Report the first press edge immediately. Keep it latched through bounce
+    // until the switch has been continuously released for 25 ms.
+    if ((rawButtonMask & bit) && !(stableButtonMask & bit)) {
+      stableButtonMask |= bit;
+      Serial.println(BUTTON_MESSAGES[index]);
+    } else if (!(rawButtonMask & bit) && (stableButtonMask & bit)
+               && now - rawChangedAt[index] >= RELEASE_DEBOUNCE_MS) {
+      stableButtonMask &= ~bit;
     }
   }
+  sendCatchPotentiometer(now);
 }

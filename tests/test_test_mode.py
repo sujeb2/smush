@@ -87,8 +87,8 @@ class FakeSerial:
     def __init__(self):
         self.led_commands = []
 
-    def set_switch_led(self, switch_number, enabled):
-        self.led_commands.append((switch_number, enabled))
+    def set_led_frame(self, switches, pixels):
+        self.led_commands.append(pixels)
 
 
 class LedTestMenuTests(unittest.TestCase):
@@ -111,7 +111,7 @@ class LedTestMenuTests(unittest.TestCase):
         self.assertEqual(self.ui.level, "led_test")
         self.assertEqual(
             self.ui.serial.led_commands,
-            [(1, False), (2, False), (3, False), (4, False)],
+            [((0, 0, 0),) * 4],
         )
 
     def test_enter_toggles_selected_led(self):
@@ -121,7 +121,7 @@ class LedTestMenuTests(unittest.TestCase):
         self.ui.activate_selection()
         self.ui.activate_selection()
 
-        self.assertEqual(self.ui.serial.led_commands, [(3, True), (3, False)])
+        self.assertEqual(self.ui.serial.led_commands, [((0, 0, 0), (0, 0, 0), (32, 32, 32), (0, 0, 0)), ((0, 0, 0),) * 4])
         self.assertFalse(self.ui.led_states[2])
 
     def test_leaving_led_test_turns_every_led_off(self):
@@ -134,7 +134,7 @@ class LedTestMenuTests(unittest.TestCase):
         self.assertEqual(self.ui.led_states, [False] * 4)
         self.assertEqual(
             self.ui.serial.led_commands,
-            [(1, False), (2, False), (3, False), (4, False)],
+            [((0, 0, 0),) * 4],
         )
 
 

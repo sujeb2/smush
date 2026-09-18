@@ -398,9 +398,10 @@ def discover_osu_mania_2k(charts_root, folder_names=()):
     return tuple(charts), tuple(rejected)
 
 
-def discover_osu_supported(charts_root, folder_names=()):
+def discover_osu_supported(charts_root, folder_names=(), excluded_folders=()):
     charts_root = os.path.abspath(charts_root)
     allowed = {name.casefold() for name in folder_names if name}
+    excluded = {name.casefold() for name in excluded_folders}
     charts = {"2k": [], "4k": [], "catch": []}
     rejected = []
     if not os.path.isdir(charts_root):
@@ -410,7 +411,7 @@ def discover_osu_supported(charts_root, folder_names=()):
         files.sort()
         relative = os.path.relpath(directory, charts_root)
         top_folder = relative.split(os.sep, 1)[0] if relative != "." else ""
-        if allowed and top_folder and top_folder.casefold() not in allowed:
+        if top_folder.casefold() in excluded or (allowed and top_folder and top_folder.casefold() not in allowed):
             directories[:] = []
             continue
         for filename in files:

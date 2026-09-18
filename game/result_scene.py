@@ -52,6 +52,8 @@ class MinigameResultSceneMixin:
         self._text_image("SCORE", 25, 940, 1498 + offset, anchor="e", tags=("result_card",))
         self.result_value_items["score"] = self._text_image("0", 63, 940, 1560 + offset, anchor="e", tags=("result_card",))
         self.result_values_shown["score"] = 0
+        if getattr(self, "extra_challenge_prompt", False):
+            self._build_extra_challenge_prompt()
 
     def _build_total_result(self):
         self._text_image("TOTAL RESULT", 54, 70, 755, anchor="w", tags=("total_result",))
@@ -71,6 +73,34 @@ class MinigameResultSceneMixin:
         self.total_result_value_item = self._text_image("0", 76, 540, 1635, tags=("total_result",))
         self.total_result_value_shown = 0
         self._image("result_down_button", 540, 1845, tags=("total_result",))
+
+    def _build_extra_challenge_prompt(self):
+        tags = ("extra_challenge",)
+        offset = self.extra_challenge_offset
+        center_x, center_y = DESIGN_WIDTH / 2, DESIGN_HEIGHT / 2
+        self._image("information", center_x, center_y + offset, tags=tags)
+        for text, size, x, y in (
+            ("스페셜 챌린지를 도전할 수 있습니다.", 30, center_x, center_y - 70),
+            ("BTN1   시도하기", 28, center_x - 185, center_y + 65),
+            ("BTN2   취소", 28, center_x + 205, center_y + 65),
+        ):
+            photo = self._text_photo(text, size, color="#39264d", font_path=self.display_font_path)
+            self.scene_photos.append(photo)
+            self.canvas.create_image(
+                self._x(x), self._y(y + offset), image=photo, anchor="center", tags=tags,
+            )
+
+    def _animate_extra_challenge_prompt(self, now):
+        if not getattr(self, "extra_challenge_prompt", False) or now < self.result_unlock_at:
+            return
+        if self.extra_challenge_started is None:
+            self.extra_challenge_started = now
+            self._play_sfx("information.wav")
+        progress = min(1.0, (now - self.extra_challenge_started) / 0.5)
+        offset = 1120.0 * (1.0 - progress) ** 3
+        self.canvas.move("extra_challenge", 0, (offset - self.extra_challenge_offset) * self.scale)
+        self.extra_challenge_offset = offset
+        self.canvas.tag_raise("extra_challenge")
 
     def _build_ending(self):
         self._image("logo", 540, 270, tags=("ending",))

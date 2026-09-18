@@ -74,11 +74,11 @@ class ClassificationIntegrationTests(unittest.TestCase):
         worker = model.Model.__new__(model.Model)
         result = Results(self.frame, 'frame.jpg', self.names,
                          boxes=torch.tensor([[0, 0, 20, 20, 0.9, 3]]))
-        recognized = worker._recognized_objects(result)
+        recognized = worker.foundObjs(result)
         self.assertEqual(recognized[0][0], 'can')
         self.assertAlmostEqual(recognized[0][1], 0.9)
         empty = Results(self.frame, 'frame.jpg', self.names, boxes=torch.empty((0, 6)))
-        self.assertEqual(worker._recognized_objects(empty), [])
+        self.assertEqual(worker.foundObjs(empty), [])
 
 
 if __name__ == '__main__':
