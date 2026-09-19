@@ -63,7 +63,9 @@ class MinigameUI(
         self.charts_by_mode, rejected = discover_osu_supported(
             charts_root, self.settings["event_chart_folders"], excluded_folders=("extrastage",),
         )
-        self.extra_charts_by_mode, extra_rejected = discover_osu_supported(os.path.join(charts_root, "extrastage"))
+        self.extra_charts_by_mode, extra_rejected = discover_osu_supported(
+            os.path.join(charts_root, "extrastage"), allow_extra=True,
+        )
         rejected += extra_rejected
         for path, reason in rejected:
             self._print(f"[ChartManager] chart skipped: {os.path.basename(path)} ({reason})")

@@ -53,6 +53,8 @@ class MinigameFlowMixin:
                 "k": 3, "K": 3, "Right": 3,
             }
             lane = lane_keys.get(event.keysym)
+            if getattr(self, "extra_stage_active", False):
+                lane = {"a": 4, "A": 4, "l": 5, "L": 5}.get(event.keysym, lane)
             if lane is not None:
                 self.press_button(lane)
             return
@@ -588,6 +590,9 @@ class MinigameFlowMixin:
         self.game_audio_started = False
         self.game_audio_offset = audio_offset
         self.gameplay = GameSession.for_mode(self.game_mode)
+        self.gameplay.health_enabled = not (
+            self.game_mode == "4k" and getattr(self, "extra_stage_active", False)
+        )
         self.display_health = 100.0
         self.catcher_x = 540.0
         self.catcher_velocity = 0.0
@@ -729,7 +734,7 @@ class MinigameFlowMixin:
                 self.track_ranks = [""] * EVENT_TRACK_COUNT
             self.track_ranks[self.track_index] = self.rank
         self.extra_challenge_prompt = (
-            self.track_index == EVENT_TRACK_COUNT - 1 and self._extra_challenge_available()
+            self.track_index == self._extra_challenge_stage_count() - 1 and self._extra_challenge_available()
         )
         self.extra_challenge_started = None
         self.extra_challenge_offset = 1120.0
@@ -814,12 +819,16 @@ class MinigameFlowMixin:
         self.root.after(180, lambda: self._play_sfx("card_show.wav") if self.scene == "total_result" else None)
         self._print(f"total result visible, total score: {sum(self.track_scores)}")
 
+    def _extra_challenge_stage_count(self):
+        return 2 if getattr(self, "demo_mode", False) else EVENT_TRACK_COUNT
+
     def _extra_challenge_available(self):
         ranks = getattr(self, "track_ranks", ())
+        required = self._extra_challenge_stage_count()
         return (
             not getattr(self, "extra_stage_active", False)
-            and len(ranks) == EVENT_TRACK_COUNT
-            and all(rank in ("S", "X") for rank in ranks)
+            and len(ranks) >= required
+            and all(rank in ("S", "X") for rank in ranks[:required])
             and any(getattr(self, "extra_charts_by_mode", {}).values())
         )
 

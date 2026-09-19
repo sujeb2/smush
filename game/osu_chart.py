@@ -165,7 +165,7 @@ def _slider_span_duration(note_time_ms, pixel_length, slider_multiplier, timing_
     return max(0.08, beat_length * pixel_length / velocity / 1000.0)
 
 
-def parse_osu_mania(path, key_count=None):
+def parse_osu_mania(path, key_count=None, *, allow_extra=False):
     format_version, sections = _read_sections(path)
     general = _key_values(sections.get("General", ()))
     metadata = _key_values(sections.get("Metadata", ()))
@@ -177,7 +177,7 @@ def parse_osu_mania(path, key_count=None):
         raise OsuChartError(f"invalid mode or circle size: {path}") from error
     if mode != 3:
         raise UnsupportedOsuChartError(f"not an osu!mania chart: {path}")
-    if parsed_key_count not in (2.0, 4.0):
+    if parsed_key_count not in ((2.0, 4.0, 6.0) if allow_extra else (2.0, 4.0)):
         raise UnsupportedOsuChartError(f"only 2K and 4K charts are supported: {path}")
     if key_count is not None and parsed_key_count != float(key_count):
         raise UnsupportedOsuChartError(f"not a {key_count}K chart: {path}")
@@ -196,6 +196,9 @@ def parse_osu_mania(path, key_count=None):
         if not note_type & 1 and not note_type & 128:
             continue
         lane = max(0, min(lane_count - 1, math.floor(x * lane_count / 512)))
+        if lane_count == 6:
+            # Four existing keys retain lanes 0..3; BTN1/BTN2 use 4/5.
+            lane = (4, 0, 1, 2, 3, 5)[lane]
         end_time = None
         if note_type & 128 and len(parts) > 5:
             try:
@@ -398,7 +401,7 @@ def discover_osu_mania_2k(charts_root, folder_names=()):
     return tuple(charts), tuple(rejected)
 
 
-def discover_osu_supported(charts_root, folder_names=(), excluded_folders=()):
+def discover_osu_supported(charts_root, folder_names=(), excluded_folders=(), *, allow_extra=False):
     charts_root = os.path.abspath(charts_root)
     allowed = {name.casefold() for name in folder_names if name}
     excluded = {name.casefold() for name in excluded_folders}
@@ -431,6 +434,8 @@ def discover_osu_supported(charts_root, folder_names=(), excluded_folders=()):
                         charts["2k"].append(parse_osu_mania_2k(path))
                     elif key_count == 4.0:
                         charts["4k"].append(parse_osu_mania_4k(path))
+                    elif key_count == 6.0 and allow_extra:
+                        charts["4k"].append(parse_osu_mania(path, 6, allow_extra=True))
                     else:
                         raise UnsupportedOsuChartError(f"only 2K and 4K charts are supported: {path}")
             except OsuChartError as error:

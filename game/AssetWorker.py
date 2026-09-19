@@ -28,6 +28,12 @@ IMAGE_PATHS = {
     "down_button": ("music_select", "down_bt.png"),
     "previous": ("music_select", "prev_music.png"),
     "next_arrow": ("music_select", "next_arrow.png"),
+    "extra_mode_warning": ("music_select", "extra_mode_warning.png"),
+    "main_layer_4k_extra": ("game", "4k_extra", "main_layer.png"),
+    "note_extra_0": ("game", "4k_extra", "sidenote_1.png"),
+    "note_extra_1": ("game", "4k_extra", "sidenote_2.png"),
+    "lane_help_extra_0": ("game", "4k_extra", "sidenote_1_help.png"),
+    "lane_help_extra_1": ("game", "4k_extra", "sidenote_2_help.png"),
     "mode_bg": ("mode_select", "mode_bg.png"),
     "mode_2k": ("mode_select", "mode_2k.png"),
     "mode_4k": ("mode_select", "mode_4k.png"),
@@ -130,6 +136,13 @@ def load_minigame_assets(base):
     sources["catch_object"].thumbnail((96, 96), Image.Resampling.LANCZOS)
     sources["catch_line"] = sources["line"].resize((1000, 33), Image.Resampling.LANCZOS)
     sources["line_4k"] = sources["line"].resize((734, 33), Image.Resampling.LANCZOS)
+    sources["line_4k_extra"] = sources["line"].resize((1080, 33), Image.Resampling.LANCZOS)
+    center = sources["main_layer_4k_extra"]
+    extra_field = Image.new("RGBA", (1080, center.height))
+    extra_field.alpha_composite(center.crop((0, 0, 169, center.height)), (0, 0))
+    extra_field.alpha_composite(center, (169, 0))
+    extra_field.alpha_composite(center.crop((579, 0, 745, center.height)), (914, 0))
+    sources["main_layer_4k_extra"] = extra_field
     sources["health_4k"] = sources["health"].resize((sources["health"].width, 734), Image.Resampling.LANCZOS)
     sources["health_bg_4k"] = sources["health_bg"].resize((sources["health_bg"].width, 734), Image.Resampling.LANCZOS)
     for rank in ("x", "s", "a", "b", "c", "d"):

@@ -494,11 +494,14 @@ class MinigameAnimationMixin:
         self._drain_serial_buffer()
 
     def _drain_serial_buffer(self, force=False):
+        extra = (getattr(self, "scene", None) == "game"
+                 and getattr(self, "game_mode", None) == "4k"
+                 and getattr(self, "extra_stage_active", False))
         entries = tuple(
             (command, action) for command, action in (
+                ("btn1", 4 if extra else 0), ("btn2", 5 if extra else 1),
                 (self.settings["button_1"], 0), (self.settings["button_2"], 1),
                 (self.settings["button_3"], 2), (self.settings["button_4"], 3),
-                ("btn1", 0), ("btn2", 1),
                 ("pot:", "pot"),
                 (self.settings["coin_message"], "coin"),
             )

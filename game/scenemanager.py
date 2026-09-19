@@ -527,6 +527,9 @@ class MinigameSceneMixin:
         self.canvas.tag_raise(self.selection_sweep_item)
 
     def _build_next(self):
+        if getattr(self, "extra_stage_active", False):
+            self._image("extra_mode_warning", 540, 1235, tags=("next",))
+            self._text_image(self.track.creator, 26, 540, 1635, tags=("next",))
         next_item = self._text_image("NEXT", 54, 540, 900, tags=("next",))
         name_item = self._text_image(self.track.title, 56, 285, 1228, tags=("next_morph",))
         difficulty_item = self._text_image(self.track.difficulty, 33, 285, 1295, tags=("next_morph",))

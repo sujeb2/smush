@@ -209,7 +209,7 @@ class MinigamePreloadMixin:
         self._catch_burst_sources()
         for name in JUDGEMENT_WEIGHT:
             self._judgement_animation_sources(name)
-        for name in ("lane_help_2k_0", "lane_help_2k_1", "lane_help_4k_0", "lane_help_4k_1"):
+        for name in ("lane_help_2k_0", "lane_help_2k_1", "lane_help_4k_0", "lane_help_4k_1", "lane_help_extra_0", "lane_help_extra_1"):
             self._lane_help_animation_sources(name)
         for name in ("demonstration_able", "demonstration_coin"):
             self._demonstration_overlay_sources(name)
@@ -319,7 +319,7 @@ class MinigamePreloadMixin:
         self.preloaded_judgement_frames = {name: [] for name in JUDGEMENT_WEIGHT}
         self.preloaded_catch_burst_frames = []
         self.preloaded_lane_help_frames = {
-            name: [] for name in ("lane_help_2k_0", "lane_help_2k_1", "lane_help_4k_0", "lane_help_4k_1")
+            name: [] for name in ("lane_help_2k_0", "lane_help_2k_1", "lane_help_4k_0", "lane_help_4k_1", "lane_help_extra_0", "lane_help_extra_1")
         }
         self.preloaded_demonstration_frames = {
             name: [] for name in ("demonstration_able", "demonstration_coin")
@@ -413,7 +413,7 @@ class MinigamePreloadMixin:
         )
         self.preloaded_lane_help_frames = {
             name: tuple(self._scaled_photo(frame) for frame in self._lane_help_animation_sources(name))
-            for name in ("lane_help_2k_0", "lane_help_2k_1", "lane_help_4k_0", "lane_help_4k_1")
+            for name in ("lane_help_2k_0", "lane_help_2k_1", "lane_help_4k_0", "lane_help_4k_1", "lane_help_extra_0", "lane_help_extra_1")
         }
         self.preloaded_demonstration_frames = {
             name: tuple(self._scaled_photo(frame) for frame in self._demonstration_overlay_sources(name))

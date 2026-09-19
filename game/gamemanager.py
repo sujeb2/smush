@@ -299,6 +299,8 @@ class MinigameGameplayMixin:
         self.combo_frame_shown = state
 
     def _start_health_animation(self, previous, current):
+        if not self.gameplay.health_enabled:
+            return
         self.health_animation_from = self.display_health
         self.health_animation_started = time.monotonic()
         self.health_pulse_started = self.health_animation_started
@@ -477,14 +479,18 @@ class MinigameGameplayMixin:
                     note, elapsed, lead_time, start_y, hit_y, active_hold,
                 )
                 x = self.lane_origin_x + note.lane * self.lane_width
+                width = self.lane_width
+                color = "#145fda" if note.lane % 2 == 0 else "#d7d7dc"
+                if getattr(self, "extra_stage_active", False) and self.game_mode == "4k" and note.lane >= 4:
+                    x, width, color = (0, 169, "#dc00e8") if note.lane == 4 else (914, 166, "#39e000")
                 if index not in self.note_items:
                     body = None
                     tail = None
                     if note.end_time is not None and note.end_time > note.time:
                         body = self.canvas.create_rectangle(
-                            self._x(x + self.lane_width * 0.112), self._y(body_top_y),
-                            self._x(x + self.lane_width * 0.888), self._y(y + 22),
-                            fill="#145fda" if note.lane % 2 == 0 else "#d7d7dc", outline="", tags=("game_note",),
+                            self._x(x + width * 0.112), self._y(body_top_y),
+                            self._x(x + width * 0.888), self._y(y + 22),
+                            fill=color, outline="", tags=("game_note",),
                         )
                         if tail_visible:
                             tail = self.canvas.create_image(
@@ -500,8 +506,8 @@ class MinigameGameplayMixin:
                     self.canvas.coords(items["head"], self._x(x), self._y(y))
                     if items["body"] is not None:
                         self.canvas.coords(
-                            items["body"], self._x(x + self.lane_width * 0.112), self._y(body_top_y),
-                            self._x(x + self.lane_width * 0.888), self._y(y + 22),
+                            items["body"], self._x(x + width * 0.112), self._y(body_top_y),
+                            self._x(x + width * 0.888), self._y(y + 22),
                         )
                         if tail_visible and items["tail"] is None:
                             items["tail"] = self.canvas.create_image(
@@ -529,7 +535,9 @@ class MinigameGameplayMixin:
         self._animate_lane_help(now)
         self._update_feedback_image()
         demonstration_finished = self.scene == "demonstration" and elapsed >= self.demonstration_end_time
-        gameplay_finished = self.scene == "game" and (self.health <= 0 or elapsed >= self.track.duration + 1.6)
+        gameplay_finished = self.scene == "game" and (
+            (self.gameplay.health_enabled and self.health <= 0) or elapsed >= self.track.duration + 1.6
+        )
         if not self.game_finishing and (demonstration_finished or gameplay_finished):
             self.game_finishing = True
             self.audio.stop(180)

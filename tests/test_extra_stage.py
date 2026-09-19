@@ -38,9 +38,28 @@ class ExtraStageTests(unittest.TestCase):
             save_progress(path, 0, 3, track_ranks=["", "", ""])
             self.assertEqual(load_event_ranks(path, 3), ["", "", ""])
 
+    def test_demo_requires_two_s_or_x_ranks(self):
+        for ranks, eligible in ((["S", "X", ""], True), (["X", "S", "A"], True),
+                                (["S", "A", "S"], False), (["S", "", ""], False)):
+            with self.subTest(ranks=ranks):
+                game = self.game(demo_mode=True, track_ranks=ranks)
+                self.assertEqual(game._extra_challenge_available(), eligible)
+        self.assertFalse(self.game(demo_mode=True, extra_stage_active=True)._extra_challenge_available())
+
+    def test_demo_offers_extra_on_second_result(self):
+        game = self.game(demo_mode=True, scene="game", game_mode="4k", track_index=1,
+                         track=SimpleNamespace(notes=[1], title="second"), resolved_notes={0},
+                         audio=Mock(), judgements=["perfect"], counts={"perfect": 1},
+                         track_scores=[1, 0, 0], track_names=["first", "", ""],
+                         track_ranks=["S", "", ""], health=100,
+                         settings={"result_seconds": 20}, _build_scene=Mock(), root=Mock(), _print=Mock())
+        game.show_result()
+        self.assertTrue(game.extra_challenge_prompt)
+        self.assertEqual(game.track_ranks, ["S", "X", ""])
+
     def test_extra_folder_is_separate_from_normal_selection(self):
         normal, _ = discover_osu_supported("game/charts", excluded_folders=("extrastage",))
-        extra, rejected = discover_osu_supported("game/charts/extrastage")
+        extra, rejected = discover_osu_supported("game/charts/extrastage", allow_extra=True)
         self.assertFalse(rejected)
         self.assertTrue(extra["4k"])
         for charts in normal.values():

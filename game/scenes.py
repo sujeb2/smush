@@ -22,7 +22,18 @@ class MinigameGameSceneMixin:
         self._text_image(self.track.title.upper(), title_size, 95, 310, anchor="w", tags=("game",))
         self._text_image("SCORE", 26, 990, 250, anchor="e", tags=("game",))
         self.score_item = self._text_image(str(self.score), 58, 990, 312, anchor="e", tags=("game_score",))
-        if self.game_mode == "4k":
+        extra = self.game_mode == "4k" and getattr(self, "extra_stage_active", False)
+        self.health_fill_item = None
+        if extra:
+            self.lane_origin_x = 169.0
+            self.lane_width = 186.25
+            self.judgement_line_y = 1850.0
+            self._image("main_layer_4k_extra", 0, 520, anchor="nw", tags=("game",))
+            self.note_photos = tuple(self._asset_photo(f"note_4k_{lane % 2}") for lane in range(4)) + (
+                self._asset_photo("note_extra_0"), self._asset_photo("note_extra_1"),
+            )
+            line_name = "line_4k_extra"
+        elif self.game_mode == "4k":
             self.lane_origin_x = 173.0
             self.lane_width = 183.5
             self.judgement_line_y = 1850.0
@@ -52,15 +63,16 @@ class MinigameGameSceneMixin:
         if self.combo > 0:
             self.canvas.itemconfigure(self.combo_item, image=self._combo_photo(self.combo, 78))
         self.judgement_line_item = self._image(
-            line_name, self.lane_origin_x, self.judgement_line_y, anchor="nw", tags=("game_line",),
+            line_name, 0 if extra else self.lane_origin_x, self.judgement_line_y, anchor="nw", tags=("game_line",),
         )
-        self._image(
-            health_background_name, self.health_background_x, self.health_background_y,
-            anchor="nw", tags=("game",),
-        )
-        self.health_fill_item = self.canvas.create_image(
-            self._x(self.health_fill_x), self._y(self.health_fill_y), anchor="s", tags=("game_health",),
-        )
+        if not extra:
+            self._image(
+                health_background_name, self.health_background_x, self.health_background_y,
+                anchor="nw", tags=("game",),
+            )
+            self.health_fill_item = self.canvas.create_image(
+                self._x(self.health_fill_x), self._y(self.health_fill_y), anchor="s", tags=("game_health",),
+            )
         self.judgement_item = self.canvas.create_image(self._x(540), self._y(1715), anchor="center", tags=("game_feedback",))
         self.judgement_frames = self.preloaded_judgement_frames
         self._update_health_image()
@@ -180,12 +192,16 @@ class MinigameGameSceneMixin:
     def _build_lane_help(self):
         lane_count = 4 if self.game_mode == "4k" else 2
         mode = "4k" if lane_count == 4 else "2k"
+        extra = mode == "4k" and getattr(self, "extra_stage_active", False)
+        if extra:
+            lane_count = 6
         self.lane_help_items = []
         for lane in range(lane_count):
-            name = f"lane_help_{mode}_{lane % 2}"
+            name = f"lane_help_extra_{lane - 4}" if extra and lane >= 4 else f"lane_help_{mode}_{lane % 2}"
+            x = (0 if lane == 4 else 914) if extra and lane >= 4 else self.lane_origin_x + lane * self.lane_width
             frames = self.preloaded_lane_help_frames[name]
             item = self.canvas.create_image(
-                self._x(self.lane_origin_x + lane * self.lane_width),
+                self._x(x),
                 self._y(self.judgement_line_y + 33), image=frames[0],
                 anchor="sw", tags=("lane_help",),
             )
