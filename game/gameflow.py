@@ -133,6 +133,8 @@ class MinigameFlowMixin:
                 self.start_result_transition()
         elif self.scene == "total_result" and lane == 1:
             self.start_total_result_transition()
+        elif self.scene == "game_ended" and lane == 1:
+            self.start_game_ended_transition()
 
     def _reset_selection(self):
         self.song_index = 0
@@ -770,7 +772,7 @@ class MinigameFlowMixin:
         self._stop_result_rank_audio()
         if getattr(self, "extra_stage_active", False):
             self._play_sfx("ok.wav")
-            self._start_loading("ending", self.show_ending)
+            self._start_loading("game_ended", self.show_game_ended)
             return
         self.result_transition_target, next_track = event_result_destination(self.track_index, is_clear(self.health))
         self.track_index = next_track
@@ -792,7 +794,7 @@ class MinigameFlowMixin:
         if self.result_transition_target == "total_result":
             self._start_loading("total_result", self.show_total_result)
             return
-        self._start_loading("ending", self.show_ending)
+        self._start_loading("game_ended", self.show_game_ended)
 
     def _finish_result_transition(self):
         if self.result_transition_target == "select":
@@ -803,7 +805,7 @@ class MinigameFlowMixin:
             self.show_total_result()
             return
         self._reset_selection()
-        self.show_ending()
+        self.show_game_ended()
 
     def show_total_result(self):
         self.scene = "total_result"
@@ -872,7 +874,28 @@ class MinigameFlowMixin:
             self.total_result_count_channel.stop()
             self.total_result_count_channel = None
         self._play_sfx("ok.wav")
-        self._start_loading("ending", self.show_ending)
+        self._start_loading("game_ended", self.show_game_ended)
+
+    def show_game_ended(self):
+        self.scene = "game_ended"
+        self.game_ended_exit_started = None
+        self.game_ended_deadline = time.monotonic() + 20.0
+        self._build_scene()
+        self.scene_started = time.monotonic()
+        self.game_ended_deadline = self.scene_started + 20.0
+        self.root.after(80, lambda: self._play_scene_audio(
+            "game_ended", "gameended.mp3", loop=True, fade_ms=300,
+        ))
+        self.root.after(180, lambda: self._play_sfx("card_show.wav")
+                        if self.scene == "game_ended" else None)
+
+    def start_game_ended_transition(self):
+        if (self.scene != "game_ended" or self.loading_phase is not None
+                or self.game_ended_exit_started is not None
+                or time.monotonic() < self.scene_started + 0.8):
+            return
+        self._play_sfx("ok.wav")
+        self.game_ended_exit_started = time.monotonic()
 
     def show_ending(self, fade_in=False):
         if self.scene == "ending":

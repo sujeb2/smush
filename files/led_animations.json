@@ -588,6 +588,47 @@
         ]
       }
     },
+    "game_ended": {
+      "loop": true,
+      "steps": [
+        {
+          "ms": 500,
+          "leds": [
+            true,
+            false,
+            false,
+            true
+          ]
+        },
+        {
+          "ms": 500,
+          "leds": [
+            false,
+            true,
+            true,
+            false
+          ]
+        }
+      ],
+      "neopixel": {
+        "mode": "rainbow",
+        "speed": 1.0,
+        "brightness": 1.0,
+        "pulse_fraction": 0.65,
+        "offset_ms": 0.0,
+        "high_health": false,
+        "colors": [
+          "#46AAFF",
+          "#FFFFFF",
+          "#46AAFF",
+          "#FFFFFF"
+        ],
+        "right_colors": [
+          "#FFAA00",
+          "#FF4400"
+        ]
+      }
+    },
     "ending": {
       "loop": true,
       "steps": [

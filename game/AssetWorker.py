@@ -9,6 +9,7 @@ IMAGE_PATHS = {
     "title_logo": ("generic", "title_logo.png"),
     "network": ("generic", "network.png"),
     "scroll": ("generic", "scroll_bg_part.png"),
+    "playcard": ("generic", "playcard.png"),
     "entry": ("generic", "entry.png"),
     "entry_cancel": ("generic", "entry_cancel.png"),
     "entry_guest": ("generic", "entry_guest.png"),

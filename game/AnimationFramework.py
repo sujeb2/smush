@@ -282,6 +282,28 @@ class MinigameAnimationMixin:
                 self.canvas.delete(self.selection_sweep_item)
                 self.selection_sweep_item = None
 
+    def _animate_game_ended(self, now):
+        elapsed = max(0.0, now - self.scene_started)
+        progress = min(1.0, elapsed / 0.8)
+        frame = round(progress * (len(self.play_card_frames) - 1))
+        if frame != self.play_card_frame_shown:
+            self.canvas.itemconfigure(self.play_card_item, image=self.play_card_frames[frame])
+            self.play_card_frame_shown = frame
+        remaining = max(0, int(self.game_ended_deadline - now + 0.999))
+        self._update_timer(self.game_ended_time_item, remaining, "game_ended_time_shown")
+        if now >= self.game_ended_deadline and self.game_ended_exit_started is None:
+            self.start_game_ended_transition()
+        if self.game_ended_exit_started is not None:
+            fade = min(1.0, max(0.0, (now - self.game_ended_exit_started) / 0.6))
+            self.canvas.itemconfigure(self.play_card_saved_item, state="normal",
+                                      image=self.play_card_saved_frames[round(fade * 16)])
+            if fade >= 1.0:
+                self._start_loading("ending", self.show_ending)
+        else:
+            # Hard on/off blinking, followed by a steady message until exit.
+            visible = elapsed >= 0.8 and (elapsed >= 3.8 or int((elapsed - 0.8) / 0.3) % 2 == 0)
+            self.canvas.itemconfigure(self.play_card_saved_item, state="normal" if visible else "hidden")
+
     def _animate_total_result(self, now):
         elapsed = now - self.scene_started
         progress = min(1.0, elapsed / 1.35)
@@ -484,6 +506,8 @@ class MinigameAnimationMixin:
             self._update_timer(self.total_result_time_item, remaining, "total_result_time_shown")
             if now >= self.total_result_deadline:
                 self.start_total_result_transition()
+        elif self.scene == "game_ended":
+            self._animate_game_ended(now)
         elif self.scene == "ending":
             self._animate_ending(now)
         self.root.after(16, self._animate)

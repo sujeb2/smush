@@ -148,6 +148,8 @@ class MinigameSceneMixin:
                 self._create_result_select_morph()
         elif self.scene == "total_result":
             self._build_total_result()
+        elif self.scene == "game_ended":
+            self._build_game_ended()
         elif self.scene == "ending":
             self._build_ending()
 
@@ -214,6 +216,7 @@ class MinigameSceneMixin:
             "demonstration": (track_label, "GAME"),
             "result": (track_label, "RESULT"),
             "total_result": ("ENDING", "<3"),
+            "game_ended": ("ENDING", "<3"),
             "ending": ("ENDING", "<3"),
         }
         first_label, second_label = labels[self.scene]

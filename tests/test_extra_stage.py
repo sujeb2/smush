@@ -92,14 +92,14 @@ class ExtraStageTests(unittest.TestCase):
         game = self.game(scene="total_result", loading_phase=None, total_result_count_channel=None,
                          _play_sfx=Mock(), _start_loading=Mock())
         game.start_total_result_transition()
-        game._start_loading.assert_called_once_with("ending", game.show_ending)
+        game._start_loading.assert_called_once_with("game_ended", game.show_game_ended)
 
     def test_extra_result_ends_without_advancing_regular_stages(self):
         game = self.game(scene="result", loading_phase=None, result_unlock_at=0,
                          extra_stage_active=True, track_index=0, track_scores=[1, 2, 3],
                          _stop_result_rank_audio=Mock(), _play_sfx=Mock(), _start_loading=Mock())
         game.start_result_transition()
-        game._start_loading.assert_called_once_with("ending", game.show_ending)
+        game._start_loading.assert_called_once_with("game_ended", game.show_game_ended)
         self.assertEqual(game.track_index, 0)
         self.assertEqual(game.track_scores, [1, 2, 3])
 

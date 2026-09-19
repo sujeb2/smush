@@ -1,6 +1,6 @@
 import time
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 from game.rules import is_clear
 from ui_framework import DESIGN_HEIGHT, DESIGN_WIDTH
@@ -73,6 +73,58 @@ class MinigameResultSceneMixin:
         self.total_result_value_item = self._text_image("0", 76, 540, 1635, tags=("total_result",))
         self.total_result_value_shown = 0
         self._image("result_down_button", 540, 1845, tags=("total_result",))
+
+    def _play_card_source(self):
+        source = self.sources["playcard"].copy()
+        draw = ImageDraw.Draw(source)
+        # Guest entry is currently the only entry mode. Profile integrations can
+        # supply these fields without baking identity text into the artwork.
+        values = (getattr(self, "player_name", "GUEST"),
+                  getattr(self, "player_id", "XXXX-XXXX"),
+                  getattr(self, "total_play_count", 0))
+        for value, y in zip(values, (100, 180, 262)):
+            text = str(value)
+            size = 34
+            font = ImageFont.truetype(self.display_font_path, size)
+            while draw.textlength(text, font=font) > 360 and size > 12:
+                size -= 1
+                font = ImageFont.truetype(self.display_font_path, size)
+            draw.text((786, y), text, font=font, fill="white", anchor="rm")
+        return source
+
+    def _build_game_ended(self):
+        self._image("logo", 540, 270, tags=("game_ended",))
+        self._text_image("GAME ENDED", 54, 70, 755, anchor="w", tags=("game_ended",))
+        self._text_image("TIME LEFT", 18, 970, 725, tags=("game_ended",))
+        remaining = max(0, int(self.game_ended_deadline - time.monotonic() + 0.999))
+        self.game_ended_time_item = self._text_image(str(remaining), 52, 970, 780)
+        self.game_ended_time_shown = remaining
+        # Reuse the entry card's opening motion, with the values composited so
+        # they unfold with the card. Rebuild for the current player each time.
+        self.sources["active_playcard"] = self._play_card_source()
+        self.entry_card_source_frames.pop("active_playcard", None)
+        self.play_card_frames = tuple(self._photo(frame) for frame in
+                                     self._entry_card_sources("active_playcard"))
+        self.play_card_frame_shown = 0
+        self.play_card_item = self.canvas.create_image(
+            self._x(540), self._y(1290), image=self.play_card_frames[0],
+            tags=("game_ended",),
+        )
+        saved = Image.new("RGBA", (240, 42))
+        ImageDraw.Draw(saved).text(
+            (120, 21), "데이터 저장됨", anchor="mm", fill="#69c83b",
+            font=ImageFont.truetype(self.display_font_path, 20),
+        )
+        frames = []
+        for index in range(17):
+            frame = saved.copy()
+            frame.putalpha(saved.getchannel("A").point(lambda a, i=index: round(a * (1 - i / 16))))
+            frames.append(self._photo(frame))
+        self.play_card_saved_frames = tuple(frames)
+        self.play_card_saved_item = self.canvas.create_image(
+            self._x(540), self._y(1645), image=frames[0], state="hidden", tags=("game_ended"),
+        )
+        self._image("result_down_button", 540, 1845, tags=("game_ended",))
 
     def _build_extra_challenge_prompt(self):
         tags = ("extra_challenge",)

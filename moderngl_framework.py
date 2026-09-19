@@ -1,4 +1,3 @@
-import glob
 import heapq
 import math
 import os
@@ -9,6 +8,8 @@ import weakref
 from array import array
 from dataclasses import dataclass, field
 from types import SimpleNamespace
+
+from font_discovery import find_font
 
 from PIL import Image, ImageColor, ImageDraw, ImageFont
 
@@ -185,8 +186,10 @@ class ModernGLCanvas:
         self.order.append(item_id)
         return item_id
 
-    def create_image(self, x, y, image=None, anchor="center", tags=()):
-        return self._create(_CanvasItem("image", [x, y], _tags(tags), image=image, anchor=anchor))
+    def create_image(self, x, y, image=None, anchor="center", tags=(), state="normal"):
+        return self._create(_CanvasItem(
+            "image", [x, y], _tags(tags), image=image, anchor=anchor, state=state,
+        ))
 
     def create_rectangle(self, x1, y1, x2, y2, fill="", outline="", width=1, tags=()):
         return self._create(_CanvasItem(
@@ -527,18 +530,14 @@ class ModernGLUIFramework:
         self.root.title(title)
         self.root.bind("<Escape>", lambda _event: self.close())
         self.font_path = os.path.join(self.base, "files", "fonts", "KERISKEDU_B.ttf")
-        font_directories = (os.path.join(os.path.expanduser("~"), "Library", "Fonts"),)
         self.novecento_font_path = self._find_font(
             ("Novecentosanswide-Normal.otf", "NovecentoSansWide-Normal.otf", "*Novecento*Normal*"),
-            font_directories,
         )
         self.novecento_demibold_font_path = self._find_font(
             ("Novecentosanswide-DemiBold.otf", "NovecentoSansWide-DemiBold.otf", "*Novecento*DemiBold*"),
-            font_directories,
         )
         self.display_font_path = self._find_font(
-            ("*A2Z*", "*에이투지체-4Regular.ttf", "*에이투지체-4Regular.ttf"),
-            font_directories,
+            ("*A2Z*4Regular*", "*A2Z*Regular*", "*에이투지체*4Regular*", "*A2Z*"),
         )
         self.canvas.update_fps_overlay(self.fps_counter.text(), self.novecento_demibold_font_path)
         self._prepare_scene()
@@ -612,13 +611,7 @@ class ModernGLUIFramework:
         self.canvas.delete("all")
 
     def _find_font(self, patterns, extra_directories=()):
-        directories = (os.path.join(self.base, "files", "fonts"), *extra_directories)
-        for directory in directories:
-            for pattern in patterns:
-                matches = sorted(glob.glob(os.path.join(directory, pattern)))
-                if matches:
-                    return matches[0]
-        return self.font_path
+        return find_font(self.base, self.font_path, patterns, extra_directories)
 
     def _scaled_photo(self, source):
         return source

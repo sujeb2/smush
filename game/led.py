@@ -1,5 +1,3 @@
-"""Scene LED timelines shared by the editor, hardware output and preview."""
-
 import json
 import os
 import tempfile
@@ -12,7 +10,7 @@ from game import neopixel
 SCENES = (
     "preload", "ci", "title", "entry", "warning", "mode_select",
     "title_select", "select", "next", "game", "demonstration", "result",
-    "total_result", "ending",
+    "total_result", "game_ended", "ending",
 )
 
 
@@ -77,7 +75,6 @@ def save(path, data):
 
 
 def sample(animation, seconds):
-    """Return four switches; non-looping timelines hold their final state."""
     elapsed = max(0, seconds * 1000)
     duration = sum(step["ms"] for step in animation["steps"])
     if animation["loop"]:
@@ -151,6 +148,6 @@ class LedOutput:
                     previous_pixels = pixels
                 except Exception as error:
                     failed = target
-                    self.report(f"LED output unavailable: {error}")
+                    self.report(f"neopixel output unavailable: {error}")
             if closing:
                 return

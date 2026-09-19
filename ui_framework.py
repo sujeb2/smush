@@ -1,10 +1,11 @@
-import glob
 import math
 import os
 import sys
 import textwrap
 import traceback
 import tkinter as tk
+
+from font_discovery import find_font
 
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 
@@ -79,18 +80,14 @@ class CanvasUIFramework:
         self.canvas = tk.Canvas(self.root, highlightthickness=0, bg="black")
         self.canvas.pack(fill="both", expand=True)
         self.font_path = os.path.join(self.base, "files", "fonts", "KERISKEDU_B.ttf")
-        font_directories = (os.path.join(os.path.expanduser("~"), "Library", "Fonts"),)
         self.novecento_font_path = self._find_font(
             ("Novecentosanswide-Normal.otf", "NovecentoSansWide-Normal.otf", "*Novecento*Normal*"),
-            font_directories,
         )
         self.novecento_demibold_font_path = self._find_font(
             ("Novecentosanswide-DemiBold.otf", "NovecentoSansWide-DemiBold.otf", "*Novecento*DemiBold*"),
-            font_directories,
         )
         self.display_font_path = self._find_font(
-            ("*A2Z*", "*에이투지체-4Regular.ttf", "*에이투지체-4Regular.ttf"),
-            font_directories,
+            ("*A2Z*4Regular*", "*A2Z*Regular*", "*에이투지체*4Regular*", "*A2Z*"),
         )
         self.root.bind("<Escape>", lambda event: self.close())
         self.canvas.bind("<Configure>", self._schedule_scene)
@@ -176,13 +173,7 @@ class CanvasUIFramework:
         self.canvas.tag_raise("unrecoverable_error")
 
     def _find_font(self, patterns, extra_directories=()):
-        directories = (os.path.join(self.base, "files", "fonts"), *extra_directories)
-        for directory in directories:
-            for pattern in patterns:
-                matches = sorted(glob.glob(os.path.join(directory, pattern)))
-                if matches:
-                    return matches[0]
-        return self.font_path
+        return find_font(self.base, self.font_path, patterns, extra_directories)
 
     def _scaled_photo(self, source):
         width = max(1, round(source.width * self.scale))
