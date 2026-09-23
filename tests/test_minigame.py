@@ -388,7 +388,7 @@ class OsuChartTests(unittest.TestCase):
         self.assertEqual(chart.mode, 2)
         self.assertEqual([(note.time, note.x) for note in chart.notes], [(1.0, 64), (1.5, 448)])
 
-    def test_supported_discovery_separates_2k_and_catch(self):
+    def test_supported_discovery_rejects_2k_and_keeps_catch(self):
         catch_path = os.path.join(self.directory.name, "catch.osu")
         with open(catch_path, "w", encoding="utf-8") as file:
             file.write(
@@ -400,9 +400,10 @@ class OsuChartTests(unittest.TestCase):
             )
         self._write_chart()
         charts, rejected = discover_osu_supported(self.directory.name)
-        self.assertEqual(len(charts["2k"]), 1)
+        self.assertNotIn("2k", charts)
+        self.assertFalse(charts["4k"])
         self.assertEqual(len(charts["catch"]), 1)
-        self.assertEqual(rejected, ())
+        self.assertEqual(len(rejected), 1)
 
 
 class ProgressTests(unittest.TestCase):
@@ -567,7 +568,7 @@ class RefactorTests(unittest.TestCase):
     def test_demonstration_excludes_test_and_sample_charts(self):
         game = MinigameUI.__new__(MinigameUI)
         game.charts_by_mode = {
-            "2k": (
+            "4k": (
                 SimpleNamespace(folder="/charts/testchart"),
                 SimpleNamespace(folder="/charts/sample-chart"),
                 SimpleNamespace(folder="/charts/music"),
@@ -605,9 +606,8 @@ class RefactorTests(unittest.TestCase):
         game.show_demonstration()
         game._complete_demonstration()
         game._complete_demonstration()
-        game._complete_demonstration()
 
-        self.assertEqual(opened, ["2k", "4k", "catch"])
+        self.assertEqual(opened, ["4k", "catch"])
         self.assertEqual(ci_scenes, [True])
         self.assertEqual((game.game_mode, game.track), ("2k", original_track))
 
@@ -683,14 +683,14 @@ class RefactorTests(unittest.TestCase):
         self.assertEqual(sources["top_gradient"].size, (1080, 520))
         self.assertEqual(sources["select_sweep"].size, (150, sources["select_bg"].height))
         self.assertEqual(sources["health_4k"].size, sources["health_bg_4k"].size)
-        self.assertTrue(all(sources[name].size == (600, 250) for name in ("mode_2k", "mode_4k", "mode_catch")))
+        self.assertTrue(all(sources[name].size == (600, 250) for name in ("mode_4k", "mode_catch")))
         mode_bounds = {
             name: sources[name].getchannel("A").point(lambda value: 255 if value > 4 else 0).getbbox()
-            for name in ("mode_2k", "mode_4k", "mode_catch")
+            for name in ("mode_4k", "mode_catch")
         }
         self.assertTrue(all(bounds[2] - bounds[0] <= 560 for bounds in mode_bounds.values()))
         self.assertTrue(all(bounds[3] - bounds[1] <= 230 for bounds in mode_bounds.values()))
-        self.assertGreater(mode_bounds["mode_2k"][2] - mode_bounds["mode_2k"][0], 500)
+        self.assertNotIn("mode_2k", sources)
         self.assertTrue(all(sources[f"rank_{rank}"].width <= 190 for rank in "xsabcd"))
         self.assertTrue(all(sources[f"rank_{rank}"].height <= 220 for rank in "xsabcd"))
         game = MinigameUI.__new__(MinigameUI)

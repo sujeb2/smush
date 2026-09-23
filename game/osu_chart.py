@@ -178,7 +178,7 @@ def parse_osu_mania(path, key_count=None, *, allow_extra=False):
     if mode != 3:
         raise UnsupportedOsuChartError(f"not an osu!mania chart: {path}")
     if parsed_key_count not in ((2.0, 4.0, 6.0) if allow_extra else (2.0, 4.0)):
-        raise UnsupportedOsuChartError(f"only 2K and 4K charts are supported: {path}")
+        raise UnsupportedOsuChartError(f"unsupported mania key count: {path}")
     if key_count is not None and parsed_key_count != float(key_count):
         raise UnsupportedOsuChartError(f"not a {key_count}K chart: {path}")
     lane_count = int(parsed_key_count)
@@ -405,7 +405,7 @@ def discover_osu_supported(charts_root, folder_names=(), excluded_folders=(), *,
     charts_root = os.path.abspath(charts_root)
     allowed = {name.casefold() for name in folder_names if name}
     excluded = {name.casefold() for name in excluded_folders}
-    charts = {"2k": [], "4k": [], "catch": []}
+    charts = {"4k": [], "catch": []}
     rejected = []
     if not os.path.isdir(charts_root):
         return {key: () for key in charts}, ()
@@ -430,14 +430,12 @@ def discover_osu_supported(charts_root, folder_names=(), excluded_folders=(), *,
                 elif mode == 3:
                     difficulty = _key_values(sections.get("Difficulty", ()))
                     key_count = float(difficulty.get("CircleSize", "0"))
-                    if key_count == 2.0:
-                        charts["2k"].append(parse_osu_mania_2k(path))
-                    elif key_count == 4.0:
+                    if key_count == 4.0:
                         charts["4k"].append(parse_osu_mania_4k(path))
                     elif key_count == 6.0 and allow_extra:
                         charts["4k"].append(parse_osu_mania(path, 6, allow_extra=True))
                     else:
-                        raise UnsupportedOsuChartError(f"only 2K and 4K charts are supported: {path}")
+                        raise UnsupportedOsuChartError(f"unsupported mania key count: {path}")
             except OsuChartError as error:
                 rejected.append((path, str(error)))
             except ValueError:
@@ -446,6 +444,4 @@ def discover_osu_supported(charts_root, folder_names=(), excluded_folders=(), *,
         mode_charts.sort(
             key=lambda chart: (os.path.relpath(chart.folder, charts_root).casefold(), chart.difficulty.casefold())
         )
-    if not charts["4k"] and charts["2k"]:
-        charts["4k"] = [derive_4k_chart(chart) for chart in charts["2k"]]
     return {key: tuple(value) for key, value in charts.items()}, tuple(rejected)

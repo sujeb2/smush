@@ -20,6 +20,7 @@ from game.rules import (
 )
 from game.persistence import save_progress
 from game.session import GameSession
+from game.settings import arrange_chart
 
 
 class MinigameFlowMixin:
@@ -45,6 +46,11 @@ class MinigameFlowMixin:
         if event.keysym in ("minus", "KP_Subtract", "-"):
             self._open_debug_test_mode()
             return
+        if self.scene == "select":
+            setting_key = {"d": 0, "f": 1, "j": 2, "k": 3, "1": 0, "2": 1, "3": 2, "4": 3}.get(event.keysym.lower())
+            if setting_key is not None:
+                self._press_selection_key(setting_key)
+                return
         if self.scene == "game" and self.game_mode == "4k":
             lane_keys = {
                 "d": 0, "D": 0, "Left": 0,
@@ -101,6 +107,8 @@ class MinigameFlowMixin:
             else:
                 self._confirm_mode()
         elif self.scene == "select":
+            if getattr(self, "settings_phase", None) is not None:
+                return
             if (
                 self.select_fade_in_started is not None
                 or self.select_morph_in_started is not None
@@ -157,7 +165,7 @@ class MinigameFlowMixin:
             return
         self._play_sfx("cursor_select.wav")
         previous_index = self.mode_index
-        mode_names = ("2k", "4k", "catch")
+        mode_names = ("4k", "catch")
         self.mode_index = (self.mode_index + 1) % len(mode_names)
         previous_source = self.sources[f"mode_{mode_names[previous_index]}"]
         source = self.sources[f"mode_{mode_names[self.mode_index]}"]
@@ -200,7 +208,7 @@ class MinigameFlowMixin:
     def _confirm_mode(self):
         if self.mode_icon_animation_started is not None:
             return
-        mode = ("2k", "4k", "catch")[self.mode_index]
+        mode = ("4k", "catch")[self.mode_index]
         if not self._apply_game_mode(mode):
             self._play_sfx("cursor_select.wav")
             self.mode_select_deadline = time.monotonic() + 5.0
@@ -446,7 +454,7 @@ class MinigameFlowMixin:
         self._build_scene()
         self.scene_started = time.monotonic()
         self.mode_select_deadline = self.scene_started + 20.0
-        self._print("mode select visible, default: 2K")
+        self._print("mode select visible, default: 4K")
 
     def show_select(self):
         self.scene = "select"
@@ -477,6 +485,8 @@ class MinigameFlowMixin:
         self._print("[AnimationManager] title to music select morph started")
 
     def show_next(self):
+        if getattr(self, "settings_phase", None) is not None:
+            self._clear_settings_overlay()
         self.scene = "next"
         self.next_audio_started = False
         self.next_audio_channel = None
@@ -580,6 +590,7 @@ class MinigameFlowMixin:
         if self.next_audio_channel is not None:
             self.next_audio_channel.stop()
             self.next_audio_channel = None
+        self.track = arrange_chart(self.track, self.settings.get("arrangement", "NONE"))
         pre_roll = 2.0 + self.track.audio_lead_in / 1000.0
         self._open_gameplay_scene("game", pre_roll, 0.0)
         self._print(f"game loaded, notes: {len(self.track.notes)}, format: v{self.track.format_version}")
@@ -595,6 +606,7 @@ class MinigameFlowMixin:
         self.gameplay.health_enabled = not (
             self.game_mode == "4k" and getattr(self, "extra_stage_active", False)
         )
+        self.gameplay.gauge = self.settings.get("gauge", "GROOVE") if scene == "game" else "GROOVE"
         self.display_health = 100.0
         self.catcher_x = 540.0
         self.catcher_velocity = 0.0
@@ -622,7 +634,7 @@ class MinigameFlowMixin:
 
     def _demonstration_candidates(self, mode=None):
         excluded = {"testchart", "sample-chart"}
-        modes = (mode,) if mode is not None else ("2k", "4k", "catch")
+        modes = (mode,) if mode is not None else ("4k", "catch")
         return tuple(
             chart
             for candidate_mode in modes
@@ -633,7 +645,7 @@ class MinigameFlowMixin:
     def show_demonstration(self):
         self.demonstration_queue = [
             (mode, random.choice(candidates))
-            for mode in ("2k", "4k", "catch")
+            for mode in ("4k", "catch")
             if (candidates := self._demonstration_candidates(mode))
         ]
         if not self.demonstration_queue:
@@ -857,11 +869,11 @@ class MinigameFlowMixin:
 
     def _show_extra_select(self):
         mode = self.game_mode
-        if not self.extra_charts_by_mode[mode]:
-            mode = next(mode for mode in ("2k", "4k", "catch") if self.extra_charts_by_mode[mode])
+        if not self.extra_charts_by_mode.get(mode):
+            mode = next(mode for mode in ("4k", "catch") if self.extra_charts_by_mode[mode])
         self.extra_stage_active = True
         self.game_mode = mode
-        self.mode_index = ("2k", "4k", "catch").index(mode)
+        self.mode_index = ("4k", "catch").index(mode)
         self.charts = self.extra_charts_by_mode[mode]
         self.song_groups = group_charts_by_song(self.charts)
         self._reset_selection()

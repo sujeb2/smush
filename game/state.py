@@ -175,6 +175,10 @@ class MinigameStateMixin:
         self.game_video_next_frame = 0.0
 
     def _initialize_selection_state(self):
+        self.settings_phase = None
+        self.settings_row = 0
+        self.settings_background = None
+        self.settings_card = None
         self.song_index = 0
         self.difficulty_index = 0
         self.selection_phase = "song"

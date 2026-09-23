@@ -440,7 +440,7 @@ class MinigameGameplayMixin:
         self._animate_catch_bursts(now)
         self._animate_health(now)
         demonstration_finished = self.scene == "demonstration" and elapsed >= self.demonstration_end_time
-        gameplay_finished = self.scene == "game" and (self.health <= 0 or elapsed >= self.track.duration + 1.2)
+        gameplay_finished = self.scene == "game" and (self.gameplay.failed or elapsed >= self.track.duration + 1.2)
         if not self.game_finishing and (demonstration_finished or gameplay_finished):
             self.game_finishing = True
             self.audio.stop(180)
@@ -536,7 +536,7 @@ class MinigameGameplayMixin:
         self._update_feedback_image()
         demonstration_finished = self.scene == "demonstration" and elapsed >= self.demonstration_end_time
         gameplay_finished = self.scene == "game" and (
-            (self.gameplay.health_enabled and self.health <= 0) or elapsed >= self.track.duration + 1.6
+            self.gameplay.failed or elapsed >= self.track.duration + 1.6
         )
         if not self.game_finishing and (demonstration_finished or gameplay_finished):
             self.game_finishing = True

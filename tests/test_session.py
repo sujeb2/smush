@@ -69,6 +69,6 @@ class GameSessionTests(unittest.TestCase):
         session.resolve_note(0, note(0, end_time=10), "miss", 2, 0)
         self.assertEqual(session.health, 0)
         self.assertFalse(session.active_holds)
-        session.health = 99.9
+        session = GameSession(health=99.9)
         session.resolve_note(1, note(), "perfect", 2, 1)
         self.assertEqual(session.health, 100)

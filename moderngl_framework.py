@@ -128,6 +128,7 @@ class _CanvasItem:
     outline: str = ""
     width: float = 1.0
     state: str = "normal"
+    scale_y: float = 1.0
 
 
 class ModernGLCanvas:
@@ -307,10 +308,11 @@ class ModernGLCanvas:
         if item.kind == "image":
             if not isinstance(item.image, Image.Image):
                 return
+            height = item.image.height * item.scale_y
             x, y = self._image_origin(
-                item.coords[0], item.coords[1], item.image.width, item.image.height, item.anchor,
+                item.coords[0], item.coords[1], item.image.width, height, item.anchor,
             )
-            self._draw_quad(x, y, item.image.width, item.image.height, item.image, (1, 1, 1, 1))
+            self._draw_quad(x, y, item.image.width, height, item.image, (1, 1, 1, 1))
             return
         x1, y1, x2, y2 = item.coords
         left, right = sorted((x1, x2))
@@ -326,6 +328,29 @@ class ModernGLCanvas:
             self._draw_quad(left, bottom - line, width, line, self.white_image, color)
             self._draw_quad(left, top + line, line, max(0, height - 2 * line), self.white_image, color)
             self._draw_quad(right - line, top + line, line, max(0, height - 2 * line), self.white_image, color)
+
+    def snapshot(self):
+        image = Image.new("RGBA", (DESIGN_WIDTH, DESIGN_HEIGHT), "black")
+        for item_id in self.order:
+            item = self.items[item_id]
+            if item.state == "hidden":
+                continue
+            if item.kind == "image" and isinstance(item.image, Image.Image):
+                if item.scale_y <= 0:
+                    continue
+                source = item.image.convert("RGBA")
+                if item.scale_y != 1.0:
+                    source = source.resize((source.width, max(1, round(source.height * item.scale_y))),
+                                           Image.Resampling.BILINEAR)
+                x, y = self._image_origin(*item.coords, source.width, source.height, item.anchor)
+                image.alpha_composite(source, (round(x), round(y)))
+            elif item.kind == "rectangle":
+                draw = ImageDraw.Draw(image)
+                x1, y1, x2, y2 = item.coords
+                draw.rectangle((min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)),
+                               fill=item.fill or None, outline=item.outline or None,
+                               width=max(1, round(item.width)))
+        return image
 
     def update_fps_overlay(self, text, font_path):
         font = ImageFont.truetype(font_path, 16)

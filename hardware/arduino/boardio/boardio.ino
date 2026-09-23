@@ -31,7 +31,6 @@ void sendCatchPotentiometer(unsigned long now) {
       readings[j - 1] = temporary;
     }
   }
-  // Median rejects isolated spikes; the temporal filter reduces steady noise.
   const long sampleQ8 = (long)readings[2] * 256;
   if (filteredPotQ8 < 0) filteredPotQ8 = sampleQ8;
   else filteredPotQ8 += (sampleQ8 - filteredPotQ8) / 4;
@@ -41,8 +40,7 @@ void sendCatchPotentiometer(unsigned long now) {
   if (now - lastPotSentAt < POT_SEND_MS) return;
   const bool changed = lastPotValue < 0 || abs(value - lastPotValue) >= POT_DEADBAND;
   if (!changed && now - lastPotSentAt < POT_REFRESH_MS) return;
-  if (!changed) value = lastPotValue;  // Heartbeats must not leak sub-threshold noise.
-  // Fixed-width, explicitly terminated: safe across split USB serial reads.
+  if (!changed) value = lastPotValue;
   char frame[11];
   snprintf(frame, sizeof(frame), "POT:%04d;", value);
   Serial.println(frame);
@@ -88,7 +86,6 @@ void handleSerialCommand(const char *command) {
       if (hi < 0 || lo < 0) return;
       rgb[i] = (hi << 4) | lo;
     }
-    // The legacy mask is reserved/ignored. D6 and D7 are now inputs.
     for (byte i = 0; i < NEOPIXEL_COUNT; ++i) {
       pixels.setPixelColor(i, rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2]);
     }
@@ -173,8 +170,6 @@ void loop() {
       rawButtonMask ^= bit;
       rawChangedAt[index] = now;
     }
-    // Report the first press edge immediately. Keep it latched through bounce
-    // until the switch has been continuously released for 25 ms.
     if ((rawButtonMask & bit) && !(stableButtonMask & bit)) {
       stableButtonMask |= bit;
       Serial.println(BUTTON_MESSAGES[index]);

@@ -19,6 +19,12 @@ class GameSession:
     max_combo: int = 0
     active_holds: dict = field(default_factory=dict)
     health_enabled: bool = True
+    gauge: str = "HARD"
+    gauge_failed: bool = False
+
+    @property
+    def failed(self):
+        return self.health_enabled and self.gauge == "HARD" and (self.gauge_failed or self.health <= 0)
 
     @classmethod
     def for_mode(cls, mode):
@@ -48,8 +54,9 @@ class GameSession:
         self.resolved_notes.add(index)
         self.judgements.append(judgement)
         self.counts[judgement] += 1
-        if self.health_enabled:
+        if self.health_enabled and not self.gauge_failed:
             self.health = min(100.0, max(0.0, self.health + health_change))
+            self.gauge_failed = self.gauge == "HARD" and self.health <= 0
         if judgement == "miss":
             self.combo = 0
         else:
@@ -85,7 +92,7 @@ class GameSession:
             while state["next"] < len(ticks) and elapsed >= ticks[state["next"]]:
                 state["next"] += 1
                 previous_health = self.health
-                if self.health_enabled:
+                if self.health_enabled and not self.gauge_failed:
                     self.health = min(100.0, self.health + .08)
                 self._advance_combo()
                 yield previous_health

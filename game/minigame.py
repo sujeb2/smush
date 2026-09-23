@@ -37,6 +37,7 @@ from game.rules import (
 )
 from game.result_scene import MinigameResultSceneMixin
 from game.scenemanager import MinigameSceneMixin
+from game.settings import MinigameSettingsMixin
 from game.state import MinigameStateMixin
 from game.osu_chart import discover_osu_supported
 from startup_health import clear_previous_error, previous_error_details
@@ -46,6 +47,7 @@ from moderngl_framework import ModernGLUIFramework
 class MinigameUI(
     LedRuntimeMixin,
     MinigameStateMixin,
+    MinigameSettingsMixin,
     MinigamePreloadMixin,
     MinigameFlowMixin,
     MinigameSceneMixin,
@@ -71,9 +73,9 @@ class MinigameUI(
             self._print(f"[ChartManager] chart skipped: {os.path.basename(path)} ({reason})")
         if not any(self.charts_by_mode.values()):
             self.root.destroy()
-            raise RuntimeError(f"[ChartManager] No valid 2K, 4K, or catch chart was found in {charts_root}")
-        self.game_mode = next(mode for mode in ("2k", "4k", "catch") if self.charts_by_mode[mode])
-        self.mode_index = ("2k", "4k", "catch").index(self.game_mode)
+            raise RuntimeError(f"[ChartManager] No valid 4K or catch chart was found in {charts_root}")
+        self.game_mode = next(mode for mode in ("4k", "catch") if self.charts_by_mode[mode])
+        self.mode_index = ("4k", "catch").index(self.game_mode)
         self.charts = self.charts_by_mode[self.game_mode]
         self.song_groups = group_charts_by_song(self.charts)
         self.progress_path = progress_path or os.path.join(self.base, self.settings["progress_file"])
@@ -121,6 +123,8 @@ class MinigameUI(
             "initial_credit_count": max(0, int(section.get("InitialCreditCount", 0))),
             "select_seconds": max(1, int(section.get("SelectSeconds", 60))),
             "result_seconds": max(1, int(section.get("ResultSeconds", 20))),
+            "arrangement": "NONE",
+            "gauge": "GROOVE",
             "scroll_speed": min(3.0, max(0.5, float(section.get("ScrollSpeed", 1.30)))),
         }
 

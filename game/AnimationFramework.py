@@ -475,10 +475,13 @@ class MinigameAnimationMixin:
         elif self.scene == "title_select":
             self._animate_title_select_morph(now)
         elif self.scene == "select":
-            self._animate_warning_select_morph(now)
-            self._animate_selection_scroll(now)
-            self._animate_scroll_speed_warning(now)
-            self._animate_select_preview(now)
+            if getattr(self, "settings_phase", None) is not None:
+                self._animate_settings(now)
+            else:
+                self._animate_warning_select_morph(now)
+                self._animate_selection_scroll(now)
+                self._animate_scroll_speed_warning(now)
+                self._animate_select_preview(now)
             remaining = max(0, int(self.select_deadline - now + 0.999))
             self._update_timer(self.select_time_item, remaining, "select_time_shown")
             if now >= self.select_deadline:
@@ -572,6 +575,10 @@ class MinigameAnimationMixin:
             self.serial_buffer = self.serial_buffer[end:]
             if action == "coin":
                 self._insert_coin()
+            elif (getattr(self, "scene", None) == "select"
+                  and command not in ("btn1", "btn2")
+                  and hasattr(self, "_press_selection_key")):
+                self._press_selection_key(action)
             else:
                 self.press_button(action)
         self.serial_buffer = self.serial_buffer[-256:]

@@ -1,7 +1,6 @@
 ﻿osu file format v128
 
 [General]
-AudioFilename: audio.ogg
 AudioLeadIn: 0
 PreviewTime: -1
 Countdown: 0
@@ -21,16 +20,16 @@ TimelineZoom: 1
 VelocityPresets: 0.75,1,1.5
 
 [Metadata]
-Title: Test
-TitleUnicode: Test
+Title: TEST
+TitleUnicode: TEST
 Artist: TEST
 ArtistUnicode: TEST
 Creator: notsongro
-Version: NORMAL
+Version: TEST
 
 [Difficulty]
 HPDrainRate: 5
-CircleSize: 2
+CircleSize: 4
 OverallDifficulty: 5
 ApproachRate: 5
 SliderMultiplier: 1.3999999687075613
@@ -48,11 +47,11 @@ SliderTickRate: 1
 // Break Periods
 
 [TimingPoints]
-0,400,4,1,0,100,1,0
+0,1000,4,1,0,100,1,0
 
 
 [HitObjects]
-128,192,100,1,0,1:0:0:100:
-384,192,400,1,0,1:0:0:100:
-128,192,400,128,0,600:1:0:0:100:
-128,192,700,1,0,1:0:0:100:
+64,192,0,1,0,1:0:0:100:
+192,192,250,1,0,1:0:0:100:
+320,192,500,1,0,1:0:0:100:
+448,192,750,1,0,1:0:0:100:

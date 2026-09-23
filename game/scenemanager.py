@@ -384,10 +384,8 @@ class MinigameSceneMixin:
 
     def _mode_description_photo(self):
         text = (
-            "두 개의 버튼을 이용하여서 노트를 처리하는 모드"
+            "네 개의 버튼과 레인을 이용하여서 노트를 처리하는 모드"
             if self.mode_index == 0
-            else "네 개의 버튼과 레인을 이용하여서 노트를 처리하는 모드"
-            if self.mode_index == 1
             else "떨어지는 물건을 받아 처리하는 모드"
         )
         photo = self._text_photo(
@@ -408,7 +406,7 @@ class MinigameSceneMixin:
         self.mode_time_item = self._text_image(str(remaining), 52, 970, 780, tags=("mode_select",))
         self.mode_time_shown = remaining
         self._image("mode_bg", 0, 1015, anchor="nw", tags=("mode_select",))
-        icon_name = f"mode_{('2k', '4k', 'catch')[self.mode_index]}"
+        icon_name = f"mode_{('4k', 'catch')[self.mode_index]}"
         self.mode_icon_item = self._image(icon_name, 540, 1160, tags=("mode_select", "mode_icon"))
         self._text_image("MODE DESCRIPTION", 29, 540, 1425, tags=("mode_select",))
         self.mode_description_item = self.canvas.create_image(
@@ -458,12 +456,15 @@ class MinigameSceneMixin:
     def _build_select(self):
         heading = "MUSIC SELECT" if self.selection_phase == "song" else "DIFFICULTY SELECT"
         self.selection_heading_item = self._text_image(heading, 54, 70, 755, anchor="w", tags=("select",))
-        self._text_image("TIME LEFT", 18, 970, 725, tags=("select",))
+        self._text_image("TIME LEFT", 18, 970, 725, tags=("select", "select_time"))
         remaining = max(0, int(self.select_deadline - time.monotonic() + 0.999))
         self.select_time_item = self._text_image(str(remaining), 52, 970, 780, tags=("select_time",))
         self.select_time_shown = remaining
         self._build_selection_shell(("select", "select_shell"))
         self._build_selection_list(("select", "select_list", "select_dynamic"))
+        self._image("tooltip_setting", 70, 835, anchor="nw", tags=("select",))
+        if getattr(self, "settings_phase", None) is not None:
+            self._build_settings_overlay()
 
     def _build_selection_shell(self, tags):
         self._image("select_bg", 32, 1110, anchor="nw", tags=tags)

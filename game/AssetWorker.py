@@ -23,6 +23,10 @@ IMAGE_PATHS = {
     "fail_io": ("generic", "fail_io.png"),
     "demonstration_able": ("generic", "demonstration_abletostart.png"),
     "demonstration_coin": ("generic", "demonstration_insertcoin.png"),
+    "option_text": ("music_select", "setting", "option_text.png"),
+    "setting_popup": ("music_select", "setting", "setting_popup.png"),
+    "selected_option": ("music_select", "setting", "selected_option.png"),
+    "tooltip_setting": ("music_select", "tooltip_setting.png"),
     "select_bg": ("music_select", "select_music_bg.png"),
     "select_icon": ("music_select", "select_icon.png"),
     "scrollspeed_warn": ("music_select", "scrollspeed_warn.png"),
@@ -36,7 +40,6 @@ IMAGE_PATHS = {
     "lane_help_extra_0": ("game", "4k_extra", "sidenote_1_help.png"),
     "lane_help_extra_1": ("game", "4k_extra", "sidenote_2_help.png"),
     "mode_bg": ("mode_select", "mode_bg.png"),
-    "mode_2k": ("mode_select", "mode_2k.png"),
     "mode_4k": ("mode_select", "mode_4k.png"),
     "mode_catch": ("mode_select", "mode_catch.png"),
     "mode_button": ("mode_select", "down_bt.png"),
@@ -120,7 +123,7 @@ def load_minigame_assets(base):
     }
     sources["select_bg"] = _remove_edge_outline(sources["select_bg"])
     sources["previous"] = _remove_edge_outline(sources["previous"])
-    for name in ("mode_2k", "mode_4k", "mode_catch"):
+    for name in ("mode_4k", "mode_catch"):
         sources[name] = _fit_mode_icon(sources[name])
     #mode_4k = Image.new("RGBA", (360, 250), (0, 0, 0, 0))
     #draw = ImageDraw.Draw(mode_4k)
