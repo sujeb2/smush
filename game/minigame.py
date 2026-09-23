@@ -10,7 +10,7 @@ from game.gameflow import MinigameFlowMixin
 from game.scenes import MinigameGameSceneMixin
 from game.gamemanager import MinigameGameplayMixin
 from game.mediaplayer import MinigameMediaMixin
-from game.persistence import load_event_results, load_event_ranks, load_progress, save_progress
+from game.persistence import load_event_results, load_event_ranks, load_progress, load_seen_tutorials, save_progress
 from game.PreloadManager import MinigamePreloadMixin
 from game.rules import (
     BAD_WINDOW,
@@ -82,6 +82,7 @@ class MinigameUI(
         self.track_index = load_progress(self.progress_path, EVENT_TRACK_COUNT)
         self.track_scores, self.track_names = load_event_results(self.progress_path, EVENT_TRACK_COUNT)
         self.track_ranks = load_event_ranks(self.progress_path, EVENT_TRACK_COUNT)
+        self.seen_tutorials = load_seen_tutorials(self.progress_path)
         self.extra_stage_active = False
         self.extra_challenge_prompt = False
         self.test_mode_callback = test_mode_callback

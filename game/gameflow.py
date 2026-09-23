@@ -18,7 +18,7 @@ from game.rules import (
     is_clear,
     rank_for_accuracy,
 )
-from game.persistence import save_progress
+from game.persistence import save_progress, save_seen_tutorials
 from game.session import GameSession
 from game.settings import arrange_chart
 
@@ -37,6 +37,9 @@ class MinigameFlowMixin:
         self._print(f"coin accepted: {self._credit_status_text()}")
 
     def _handle_key(self, event):
+        if getattr(self, "scene", None) == "game" and getattr(self, "how_to_play_mode", None) is not None:
+            self._dismiss_how_to_play()
+            return
         if event.keysym in ("F6", "f6"):
             self._toggle_led_preview()
             return
@@ -89,6 +92,9 @@ class MinigameFlowMixin:
             or self.title_entry_morph_started is not None
             or self.mode_morph_in_started is not None
         ):
+            return
+        if self.scene == "game" and getattr(self, "how_to_play_mode", None) is not None:
+            self._dismiss_how_to_play()
             return
         if self.scene == "title":
             self._play_sfx("start.wav")
@@ -599,7 +605,12 @@ class MinigameFlowMixin:
         self.audio.stop()
         self.scene = scene
         self.scene_started = time.monotonic()
-        self.game_started = self.scene_started + pre_roll
+        tutorial = "extra" if getattr(self, "extra_stage_active", False) else self.game_mode
+        self.how_to_play_mode = (
+            tutorial if scene == "game" and tutorial not in getattr(self, "seen_tutorials", set()) else None
+        )
+        self.how_to_play_pre_roll = pre_roll
+        self.game_started = None if self.how_to_play_mode is not None else self.scene_started + pre_roll
         self.game_audio_started = False
         self.game_audio_offset = audio_offset
         self.gameplay = GameSession.for_mode(self.game_mode)
@@ -629,8 +640,27 @@ class MinigameFlowMixin:
         self.lane_help_frame_shown = {}
         self._prepare_game_media(self.track)
         self._build_scene()
-        delay = round(pre_roll * 1000)
-        self.game_audio_job = self.root.after(delay, self._start_chart_audio)
+        if self.how_to_play_mode is not None:
+            self.how_to_play_deadline = time.monotonic() + 15.0
+            self.game_audio_job = None
+            self._print(f"how to play visible: {self.how_to_play_mode.upper()}")
+        else:
+            self.game_audio_job = self.root.after(round(pre_roll * 1000), self._start_chart_audio)
+
+    def _dismiss_how_to_play(self):
+        tutorial = getattr(self, "how_to_play_mode", None)
+        if tutorial is None or self.scene != "game":
+            return
+        self.how_to_play_mode = None
+        self.canvas.delete("how_to_play")
+        self.seen_tutorials.add(tutorial)
+        try:
+            save_seen_tutorials(self.progress_path, self.seen_tutorials)
+        except OSError as error:
+            self._print(f"how to play progress save failed: {error}")
+        self.game_started = time.monotonic() + self.how_to_play_pre_roll
+        self.game_audio_job = self.root.after(round(self.how_to_play_pre_roll * 1000), self._start_chart_audio)
+        self._print(f"how to play closed: {tutorial.upper()}")
 
     def _demonstration_candidates(self, mode=None):
         excluded = {"testchart", "sample-chart"}
@@ -712,6 +742,8 @@ class MinigameFlowMixin:
 
     def _game_elapsed(self):
         audio_offset = getattr(self, "game_audio_offset", 0.0)
+        if self.game_started is None:
+            return audio_offset
         if self.game_audio_started:
             position = self.audio.position_seconds()
             if position is not None:

@@ -489,8 +489,12 @@ class MinigameAnimationMixin:
         elif self.scene == "next":
             self._animate_next(now)
         elif self.scene == "game":
-            self._animate_game_media(now)
-            self._update_game_frame(now)
+            if getattr(self, "how_to_play_mode", None) is not None:
+                if now >= self.how_to_play_deadline:
+                    self._dismiss_how_to_play()
+            else:
+                self._animate_game_media(now)
+                self._update_game_frame(now)
         elif self.scene == "demonstration":
             self._animate_demonstration(now)
         elif self.scene == "result":

@@ -53,6 +53,8 @@ IMAGE_PATHS = {
     "lane_help_2k_1": ("game", "lane2_help.png"),
     "lane_help_4k_0": ("game", "4k", "lane1_help.png"),
     "lane_help_4k_1": ("game", "4k", "lane2_help.png"),
+    "how_to_play_4k": ("game", "howtoplay", "4k.png"),
+    "how_to_play_extra": ("game", "howtoplay", "extra.png"),
     "line": ("game", "panjung.png"),
     "health": ("game", "health.png"),
     "health_bg": ("game", "health_bg.png"),

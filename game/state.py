@@ -118,6 +118,9 @@ class MinigameStateMixin:
     def _initialize_gameplay_state(self):
         self.gameplay = GameSession()
         self.game_started = None
+        self.how_to_play_mode = None
+        self.how_to_play_deadline = 0.0
+        self.how_to_play_pre_roll = 0.0
         self.game_audio_started = False
         self.game_audio_offset = 0.0
         self.game_audio_job = None

@@ -5,6 +5,30 @@ from ui_framework import DESIGN_HEIGHT, DESIGN_WIDTH
 
 
 class MinigameGameSceneMixin:
+    def _build_how_to_play(self):
+        if self.how_to_play_mode == "catch":
+            if "how_to_play_catch" not in self.sources:
+                source = Image.new("RGBA", (1080, 355), (0, 0, 0, 0))
+                draw = ImageDraw.Draw(source)
+                for y in range(355):
+                    shade = round(30 * y / 355)
+                    opacity = round(235 * (1 - y / 355))
+                    draw.line((0, y, 1080, y), fill=(shade, shade, shade, opacity))
+                title_font = ImageFont.truetype(self.novecento_demibold_font_path, 39)
+                text_font = ImageFont.truetype(self.display_font_path, 32)
+                footer_font = ImageFont.truetype(self.display_font_path, 26)
+                draw.text((68, 70), "HOW TO PLAY", font=title_font, fill="white", anchor="lm")
+                draw.text((540, 158), "떨어지는 물건을 받침대로 받아주세요.",
+                          font=text_font, fill="white", anchor="mm")
+                draw.text((540, 203), "좌우 버튼 또는 조절 손잡이로 움직일 수 있습니다.",
+                          font=text_font, fill="white", anchor="mm")
+                draw.text((540, 309), "아무 키나 눌러 계속", font=footer_font, fill="white", anchor="mm")
+                self.sources["how_to_play_catch"] = source
+            name = "how_to_play_catch"
+        else:
+            name = f"how_to_play_{self.how_to_play_mode}"
+        self._image(name, 0, 690, anchor="nw", tags=("how_to_play",))
+
     def _build_game(self): # game ui
         if self.game_mode == "catch":
             self._build_catch_game()

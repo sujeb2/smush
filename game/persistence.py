@@ -44,6 +44,33 @@ def load_event_ranks(path, track_count):
     return ranks
 
 
+def load_seen_tutorials(path):
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            seen = json.load(file).get("seen_tutorials", [])
+        return {name for name in seen if name in ("4k", "catch", "extra")}
+    except (OSError, ValueError, TypeError, AttributeError):
+        return set()
+
+
+def save_seen_tutorials(path, seen):
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            payload = json.load(file)
+        if not isinstance(payload, dict):
+            payload = {}
+    except (OSError, ValueError, TypeError):
+        payload = {}
+    payload["seen_tutorials"] = sorted(seen)
+    temporary_path = f"{path}.tmp"
+    with open(temporary_path, "w", encoding="utf-8") as file:
+        json.dump(payload, file)
+    os.replace(temporary_path, path)
+
+
 def save_progress(path, track_index, track_count, track_scores=None, track_names=None, track_ranks=None):
     if track_count <= 0:
         return
@@ -68,4 +95,3 @@ def save_progress(path, track_index, track_count, track_scores=None, track_names
     with open(temporary_path, "w", encoding="utf-8") as file:
         json.dump(payload, file)
     os.replace(temporary_path, path)
-

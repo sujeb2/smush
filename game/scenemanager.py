@@ -120,6 +120,8 @@ class MinigameSceneMixin:
             self._build_game()
             if self.scene == "demonstration":
                 self._build_demonstration_overlay()
+            elif getattr(self, "how_to_play_mode", None) is not None:
+                self._build_how_to_play()
             return
         self._image("top_gradient", 0, 0, anchor="nw", tags=("background",))
         if self.scene == "ci":
