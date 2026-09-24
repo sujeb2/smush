@@ -19,9 +19,9 @@ class ExtraStageTests(unittest.TestCase):
         game.__dict__.update(values)
         return game
 
-    def test_requires_three_s_or_x_ranks(self):
-        for ranks, eligible in ((["S", "S", "S"], True), (["X", "S", "X"], True),
-                                (["S", "A", "X"], False), (["S", "S", ""], False),
+    def test_requires_three_a_or_higher_ranks(self):
+        for ranks, eligible in ((["A", "A", "A"], True), (["S", "A", "X"], True),
+                                (["S", "B", "X"], False), (["S", "S", ""], False),
                                 (["S", "S"], False)):
             with self.subTest(ranks=ranks):
                 self.assertEqual(self.game(track_ranks=ranks)._extra_challenge_available(), eligible)
@@ -38,9 +38,9 @@ class ExtraStageTests(unittest.TestCase):
             save_progress(path, 0, 3, track_ranks=["", "", ""])
             self.assertEqual(load_event_ranks(path, 3), ["", "", ""])
 
-    def test_demo_requires_two_s_or_x_ranks(self):
-        for ranks, eligible in ((["S", "X", ""], True), (["X", "S", "A"], True),
-                                (["S", "A", "S"], False), (["S", "", ""], False)):
+    def test_demo_requires_two_a_or_higher_ranks(self):
+        for ranks, eligible in ((["A", "A", ""], True), (["X", "S", "B"], True),
+                                (["S", "B", "S"], False), (["S", "", ""], False)):
             with self.subTest(ranks=ranks):
                 game = self.game(demo_mode=True, track_ranks=ranks)
                 self.assertEqual(game._extra_challenge_available(), eligible)

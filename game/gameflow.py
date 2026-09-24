@@ -874,7 +874,7 @@ class MinigameFlowMixin:
         return (
             not getattr(self, "extra_stage_active", False)
             and len(ranks) >= required
-            and all(rank in ("S", "X") for rank in ranks[:required])
+            and all(rank in ("A", "S", "X") for rank in ranks[:required])
             and any(getattr(self, "extra_charts_by_mode", {}).values())
         )
 
