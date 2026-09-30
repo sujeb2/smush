@@ -40,6 +40,11 @@ class MinigameMediaMixin:
 
     def _selection_media_image(self, image, video):
         image = image.convert("RGB")
+        if getattr(self, "extra_stage_active", False) and self.scene == "select":
+            return ImageOps.fit(
+                image, (DESIGN_WIDTH, DESIGN_HEIGHT), method=Image.Resampling.BILINEAR,
+                centering=(0.5, 0.5),
+            ).convert("RGBA")
         if video:
             image.thumbnail((170, 150), Image.Resampling.LANCZOS)
             frame = Image.new("RGBA", (170, 150), (20, 16, 28, 255))

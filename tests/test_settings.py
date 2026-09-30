@@ -37,6 +37,17 @@ def settings_game():
 
 
 class SettingsTests(unittest.TestCase):
+    def test_extra_stage_keyboard_one_opens_settings(self):
+        game = settings_game()
+        game.extra_stage_active = True
+        game.selection_phase = "difficulty"
+        deadline = game.select_deadline
+        game._handle_key(SimpleNamespace(keysym="1"))
+        self.assertEqual(game.settings_phase, "opening")
+        game._animate_settings(game.settings_animation_started + .45)
+        self.assertEqual(game.settings_phase, "open")
+        self.assertEqual(game.select_deadline, deadline)
+
     def test_keyboard_open_navigation_values_and_animated_close(self):
         game = settings_game()
         original = game.canvas.snapshot()

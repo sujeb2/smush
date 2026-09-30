@@ -197,6 +197,7 @@ class MinigameGameplayMixin:
             self.canvas.itemconfigure(self.score_item, image=self._text(str(self.score), 58))
         if self.catch_score_item is not None:
             self.canvas.itemconfigure(self.catch_score_item, image=self._text(str(self.score), 70))
+        self._update_current_rank()
         self._start_health_animation(previous_health, self.health)
 
     def _judge(self, lane):
@@ -223,6 +224,7 @@ class MinigameGameplayMixin:
         self.feedback_frame_shown = 0
         if self.score_item is not None:
             self.canvas.itemconfigure(self.score_item, image=self._text(str(self.score), 58))
+        self._update_current_rank()
         self._start_health_animation(previous_health, self.health)
         if self.judgement_item is not None:
             self.canvas.itemconfigure(self.judgement_item, image=self.judgement_frames[self.last_feedback][0])

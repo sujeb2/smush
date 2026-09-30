@@ -4,13 +4,79 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from PIL import Image
+
 from game.gameflow import MinigameFlowMixin
+from game.mediaplayer import MinigameMediaMixin
 from game.result_scene import MinigameResultSceneMixin
 from game.osu_chart import discover_osu_supported
 from game.persistence import load_event_ranks, save_progress
+from game.scenemanager import _extra_stage_levels, _is_japanese_title
 
 
 class ExtraStageTests(unittest.TestCase):
+    def test_extra_selection_caps_timer_and_starts_with_difficulties(self):
+        for configured, expected in ((60, 30), (20, 20)):
+            game = self.game(extra_stage_active=True, settings={"select_seconds": configured},
+                             song_groups=[[Mock()]], audio=Mock(), root=Mock(),
+                             _build_scene=Mock(), _schedule_select_preview=Mock(),
+                             _print=Mock(), _broadcast_selection=Mock())
+            with patch("game.gameflow.time.monotonic", return_value=100):
+                game.show_select()
+            self.assertEqual(game.selection_phase, "difficulty")
+            self.assertEqual(game.select_deadline, 100 + expected)
+
+    def test_extra_confirmation_fades_directly_to_game(self):
+        for remote in (False, True):
+            game = self.game(extra_stage_active=True, scene="select", loading_phase=None,
+                             applying_shared_selection=remote, settings_phase="open",
+                             _broadcast_selection=Mock(return_value=True), audio=Mock(),
+                             _clear_settings_overlay=Mock(), _start_loading=Mock())
+            game.show_next()
+            self.assertEqual(game.scene, "select")
+            game._start_loading.assert_called_once_with("game", game._start_game_scene)
+            game._clear_settings_overlay.assert_called_once()
+            game.audio.stop.assert_called_once_with(480)
+            if not remote:
+                game._broadcast_selection.assert_called_once_with("next")
+
+    def test_extra_stage_title_font_selection(self):
+        self.assertTrue(_is_japanese_title("夜に駆ける"))
+        self.assertTrue(_is_japanese_title("カタカナ"))
+        self.assertFalse(_is_japanese_title("AA"))
+
+    def test_extra_stage_level_slots(self):
+        charts = [SimpleNamespace(difficulty=name, level=level) for name, level in (
+            ("HARD", 12), ("EASY", 4), ("NORMAL", 8),
+        )]
+        self.assertEqual([chart.level for chart in _extra_stage_levels(charts)], [4, 8, 12])
+        self.assertEqual(
+            [chart.level if chart else None for chart in _extra_stage_levels(
+                [SimpleNamespace(difficulty="EXTRA", level=15)]
+            )],
+            [None, None, 15],
+        )
+
+    def test_extra_stage_media_uses_full_background(self):
+        media = MinigameMediaMixin()
+        media.scene = "select"
+        media.extra_stage_active = True
+        source = Image.new("RGB", (320, 240), "red")
+        self.assertEqual(media._selection_media_image(source, True).size, (1080, 1920))
+        media.extra_stage_active = False
+        self.assertEqual(media._selection_media_image(source, True).size, (170, 150))
+
+    def test_extra_stage_difficulty_keeps_template(self):
+        chart = SimpleNamespace(title="AA")
+        game = self.game(scene="select", song_groups=[[chart]], song_index=0,
+                         selection_heading_item=None, canvas=Mock(), _play_sfx=Mock(),
+                         _refresh_selection_list=Mock(), _print=Mock(), _broadcast_selection=Mock())
+        game.extra_stage_active = True
+        game._confirm_song()
+        self.assertEqual(game.selection_phase, "difficulty")
+        game.canvas.delete.assert_not_called()
+        game._refresh_selection_list.assert_called_once()
+
     def game(self, **values):
         game = MinigameFlowMixin()
         game.track_ranks = ["S", "X", "S"]

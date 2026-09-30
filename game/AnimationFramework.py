@@ -8,6 +8,14 @@ from ui_framework import DESIGN_WIDTH
 
 class MinigameAnimationMixin:
     def _animate_common(self, now):
+        if (getattr(self, "two_player", False)
+                and now - getattr(self, "selection_sync_checked_at", 0.0) >= 0.05):
+            self.selection_sync_checked_at = now
+            self._poll_shared_selection()
+        if (getattr(self, "two_player", False) and not getattr(self, "solo_active", False) and self.scene == "game"
+                and now - getattr(self, "rival_rank_checked_at", 0.0) >= 0.25):
+            self.rival_rank_checked_at = now
+            self._update_rival_rank()
         elapsed = now - self.animation_epoch
         if self.particle_item is not None:
             y = self.particle_base_y + 13 * math.sin(elapsed * 0.8)
@@ -42,6 +50,25 @@ class MinigameAnimationMixin:
             self.show_select()
 
     def _animate_entry(self, now):
+        if getattr(self, "two_player", False):
+            self._sync_entry_round()
+            joined = self._refresh_entry_joined()
+            decision = self._entry_decision()
+            if decision is not None:
+                release_at = decision["at"]
+                wall_now = time.time()
+                if wall_now >= release_at:
+                    self.solo_active = decision["mode"] == "solo"
+                    self.show_warning(started_at=now + release_at - wall_now)
+                return
+            if joined:
+                return
+            progress = min(1.0, (now - self.scene_started) / 0.72)
+            frame = min(len(self.entry_card_frames) - 1, round(progress * (len(self.entry_card_frames) - 1)))
+            if frame != self.entry_card_frame_shown:
+                self.canvas.itemconfigure(self.entry_card_item, image=self.entry_card_frames[frame])
+                self.entry_card_frame_shown = frame
+            return
         if self.entry_title_fade_started is not None:
             progress = min(1.0, (now - self.entry_title_fade_started) / 0.65)
             eased = progress * progress * (3 - 2 * progress)
@@ -61,7 +88,8 @@ class MinigameAnimationMixin:
                 self.entry_card_frame_shown = frame
             if now >= self.entry_choice_deadline:
                 if self.entry_choice == "guest":
-                    self.show_warning()
+                    if not getattr(self, "two_player", False) or len(self._joined_stations()) == 2 or now >= self.entry_deadline:
+                        self.show_warning()
                 else:
                     self._start_entry_title_transition()
             return
@@ -99,7 +127,9 @@ class MinigameAnimationMixin:
                 self.mode_icon_frames = ()
         remaining = max(0, int(self.mode_select_deadline - now + 0.999))
         self._update_timer(self.mode_time_item, remaining, "mode_time_shown")
-        if now >= self.mode_select_deadline:
+        if now >= self.mode_select_deadline and not (
+            getattr(self, "two_player", False) and self.station != self._entry_controller_station()
+        ):
             self._confirm_mode()
 
     def _animate_warning_mode_morph(self, now):
@@ -451,6 +481,8 @@ class MinigameAnimationMixin:
         self._poll_events()
         if self.unrecoverable_error:
             return
+        if getattr(self, "two_player", False):
+            self._follow_shared_entry()
         if self.scene != "game":
             self._animate_common(now)
         if self.loading_phase is not None:
@@ -484,7 +516,10 @@ class MinigameAnimationMixin:
                 self._animate_select_preview(now)
             remaining = max(0, int(self.select_deadline - now + 0.999))
             self._update_timer(self.select_time_item, remaining, "select_time_shown")
-            if now >= self.select_deadline:
+            if now >= self.select_deadline and not (
+                getattr(self, "solo_active", False)
+                and self.station != self._entry_controller_station()
+            ):
                 self.show_next()
         elif self.scene == "next":
             self._animate_next(now)

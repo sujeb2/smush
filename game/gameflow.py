@@ -1,4 +1,6 @@
 import os
+import hashlib
+import json
 import random
 import time
 
@@ -21,6 +23,7 @@ from game.rules import (
 from game.persistence import save_progress, save_seen_tutorials
 from game.session import GameSession
 from game.settings import arrange_chart
+from game.selection_sync import publish_selection, read_selection, shared_lock
 
 
 class MinigameFlowMixin:
@@ -50,6 +53,8 @@ class MinigameFlowMixin:
             self._open_debug_test_mode()
             return
         if self.scene == "select":
+            if getattr(self, "two_player", False):
+                self._poll_shared_selection()
             setting_key = {"d": 0, "f": 1, "j": 2, "k": 3, "1": 0, "2": 1, "3": 2, "4": 3}.get(event.keysym.lower())
             if setting_key is not None:
                 self._press_selection_key(setting_key)
@@ -93,6 +98,9 @@ class MinigameFlowMixin:
             or self.mode_morph_in_started is not None
         ):
             return
+        if (getattr(self, "solo_active", False)
+                and self.station != self._entry_controller_station()):
+            return
         if self.scene == "game" and getattr(self, "how_to_play_mode", None) is not None:
             self._dismiss_how_to_play()
             return
@@ -103,16 +111,29 @@ class MinigameFlowMixin:
         elif self.scene == "entry":
             if self.entry_choice is not None:
                 return
-            if lane == 0:
+            if getattr(self, "two_player", False):
+                if self.entry_joined:
+                    if lane == 0:
+                        self._start_single_entry()
+                else:
+                    self._join_entry()
+            elif lane == 0:
                 self._show_entry_choice("guest")
             else:
                 self._show_entry_choice("cancel")
         elif self.scene == "mode_select":
+            if (getattr(self, "two_player", False)
+                    and self.station != self._entry_controller_station()):
+                return
             if lane == 0:
                 self._cycle_mode()
             else:
                 self._confirm_mode()
         elif self.scene == "select":
+            if getattr(self, "two_player", False):
+                self._poll_shared_selection()
+                if self.scene != "select":
+                    return
             if getattr(self, "settings_phase", None) is not None:
                 return
             if (
@@ -167,6 +188,8 @@ class MinigameFlowMixin:
         return True
 
     def _cycle_mode(self):
+        if getattr(self, "two_player", False):
+            return
         if self.mode_icon_animation_started is not None:
             return
         self._play_sfx("cursor_select.wav")
@@ -212,6 +235,10 @@ class MinigameFlowMixin:
         self._print(f"mode selected: {mode_names[self.mode_index].upper()}")
 
     def _confirm_mode(self):
+        if (getattr(self, "two_player", False)
+                and self.station != self._entry_controller_station()
+                and not getattr(self, "applying_shared_selection", False)):
+            return
         if self.mode_icon_animation_started is not None:
             return
         mode = ("4k", "catch")[self.mode_index]
@@ -221,6 +248,7 @@ class MinigameFlowMixin:
             self._print(f"[ChartManager] no compatible {mode} chart was found")
             return
         self._play_sfx("ok.wav")
+        self._broadcast_selection("mode")
         self._start_loading("select", self._show_initial_select)
 
     def _show_initial_select(self):
@@ -273,6 +301,10 @@ class MinigameFlowMixin:
         self._print("[AnimationManager] warning to mode select morph started")
 
     def _cycle_selection(self):
+        if getattr(self, "two_player", False):
+            self._poll_shared_selection()
+            if self.scene != "select":
+                return
         self._play_sfx("cursor_select.wav")
         previous_preview = self._track_preview_key(self.track)
         if self.selection_phase == "song":
@@ -288,18 +320,25 @@ class MinigameFlowMixin:
         self._refresh_selection_list()
         if self._track_preview_key(self.track) != previous_preview:
             self._schedule_select_preview(1.0)
+        self._broadcast_selection("select")
 
     def _confirm_song(self):
+        if getattr(self, "two_player", False):
+            self._poll_shared_selection()
+            if self.scene != "select":
+                return
         self._play_sfx("ok.wav")
         self.selection_phase = "difficulty"
         self.difficulty_index = 0
         self.track = self.song_groups[self.song_index][0]
         if self.selection_heading_item is not None:
             self.canvas.itemconfigure(self.selection_heading_item, image=self._text("DIFFICULTY SELECT", 54))
-        self.canvas.delete("select_shell")
-        self._build_selection_shell(("select", "select_shell"))
+        if not getattr(self, "extra_stage_active", False):
+            self.canvas.delete("select_shell")
+            self._build_selection_shell(("select", "select_shell"))
         self._refresh_selection_list()
         self._print(f"difficulty select visible, song: {self.track.title}")
+        self._broadcast_selection("select")
 
     def _refresh_selection_list(self):
         self.canvas.delete("select_list")
@@ -372,19 +411,294 @@ class MinigameFlowMixin:
         self.root.after(credits_delay, lambda: self._play_sfx("ci.wav") if self.scene == "ci" else None)
         self._print("title intermission visible, sequence duration: 8 seconds")
 
-    def show_entry(self):
+    def show_entry(self, shared_state=None):
+        if shared_state is not None:
+            if self.scene == "demonstration":
+                self._restore_demonstration_state()
+            if getattr(self, "audio", None) is not None:
+                self.audio.stop(180)
+            if getattr(self, "game_audio_job", None) is not None:
+                self.root.after_cancel(self.game_audio_job)
+                self.game_audio_job = None
+            self.loading_phase = None
+            self.loading_action = None
+            self.loading_target = None
+            self.transition_phase = None
         self.scene = "entry"
         self.entry_choice = None
+        if getattr(self, "two_player", False):
+            if shared_state is None:
+                self._advance_entry_round()
+                shared_state = self._entry_state()
+            else:
+                self.entry_round = shared_state["round"]
+            self.entry_joined = False
+            self.solo_active = False
+            self._clear_join_marker()
+            self.selection_sync_seen = None
+            if self.station == 1:
+                try:
+                    os.unlink(self._selection_sync_path())
+                except FileNotFoundError:
+                    pass
+            try:
+                os.unlink(os.path.join(self.session_dir, f"score_{self.station}"))
+            except FileNotFoundError:
+                pass
         self.entry_choice_started = 0.0
         self.entry_choice_deadline = 0.0
         self.entry_title_fade_started = None
-        self.entry_deadline = time.monotonic() + 20.0
+        self.entry_deadline = float("inf") if getattr(self, "two_player", False) else time.monotonic() + 20.0
         self._build_scene()
         self.scene_started = time.monotonic()
-        self.entry_deadline = self.scene_started + 20.0
+        if shared_state is not None and "entered_at" in shared_state:
+            self.scene_started -= max(0.0, time.time() - shared_state["entered_at"])
+        self.entry_deadline = float("inf") if getattr(self, "two_player", False) else self.scene_started + 20.0
         self.root.after(80, self._play_entry_audio)
         self.root.after(140, lambda: self._play_sfx("card_show.wav") if self.scene == "entry" else None)
-        self._print("[AnimationManager] entry visible, guest play only")
+        self._print("[AnimationManager] entry visible, waiting for both players" if getattr(self, "two_player", False)
+                    else "[AnimationManager] entry visible, guest play only")
+
+    def _join_marker(self, station=None):
+        return os.path.join(self.session_dir, f"joined_{station or self.station}")
+
+    def _entry_state_path(self):
+        return os.path.join(self.session_dir, "entry_state.json")
+
+    def _write_entry_state(self, state):
+        path = self._entry_state_path()
+        temporary = f"{path}.{os.getpid()}.tmp"
+        with open(temporary, "w", encoding="utf-8") as stream:
+            json.dump(state, stream)
+        os.replace(temporary, path)
+
+    def _entry_state(self):
+        return read_selection(self._entry_state_path()) or {"round": 0}
+
+    def _advance_entry_round(self):
+        path = self._entry_state_path()
+        with shared_lock(path):
+            state = self._entry_state()
+            next_round = max(getattr(self, "entry_round", 0) + 1, state.get("round", 0))
+            if next_round > state.get("round", 0):
+                state = {"round": next_round, "entered_at": time.time()}
+                self._write_entry_state(state)
+            self.entry_round = next_round
+
+    def _follow_shared_entry(self):
+        if (not getattr(self, "two_player", False) or self.scene == "preload"
+                or not getattr(self, "preload_complete", False)):
+            return
+        state = self._entry_state()
+        if state.get("round", 0) > getattr(self, "entry_round", 0):
+            self.show_entry(shared_state=state)
+
+    def _sync_entry_round(self):
+        state = self._entry_state()
+        if state.get("round", 0) <= self.entry_round:
+            return
+        self.entry_round = state["round"]
+        self.entry_joined = False
+        self.solo_active = False
+        self._clear_join_marker()
+        self._build_scene()
+        self.scene_started = time.monotonic()
+        if "entered_at" in state:
+            self.scene_started -= max(0.0, time.time() - state["entered_at"])
+
+    def _entry_decision(self):
+        state = self._entry_state()
+        return state if state.get("round") == self.entry_round and state.get("mode") else None
+
+    def _entry_controller_station(self):
+        decision = self._entry_decision() if getattr(self, "two_player", False) else None
+        return decision.get("station", 1) if decision is not None else 1
+
+    def _selection_sync_path(self):
+        return os.path.join(self.session_dir, "selection.json")
+
+    def _broadcast_selection(self, kind, *, initial=False):
+        if not getattr(self, "two_player", False):
+            return True
+        if getattr(self, "solo_active", False) and self.station != self._entry_controller_station():
+            return True
+        if kind == "mode" and self.station != self._entry_controller_station():
+            return True
+        state = {
+            "stage": f"{self.track_index}:{int(bool(getattr(self, 'extra_stage_active', False)))}",
+            "kind": kind, "mode": self.game_mode,
+            "extra": bool(getattr(self, "extra_stage_active", False)),
+            "track_index": self.track_index, "song_index": self.song_index,
+            "difficulty_index": self.difficulty_index, "phase": self.selection_phase,
+            "chart_path": self.track.path,
+        }
+        published, wrote = publish_selection(self._selection_sync_path(), state, initial=initial)
+        if wrote:
+            self.selection_sync_seen = (published["stage"], published["version"])
+        else:
+            self._poll_shared_selection()
+        return wrote
+
+    def _poll_shared_selection(self):
+        if not getattr(self, "two_player", False):
+            return
+        if self.loading_phase is not None or self.transition_phase is not None:
+            return
+        state = read_selection(self._selection_sync_path())
+        if state is None:
+            return
+        marker = (state.get("stage"), state.get("version"))
+        if not isinstance(marker[1], int) or marker == getattr(self, "selection_sync_seen", None):
+            return
+        if self.scene == "mode_select":
+            if self.station == self._entry_controller_station() or state.get("mode") != "4k":
+                return
+            self.applying_shared_selection = True
+            try:
+                self._confirm_mode()
+            finally:
+                self.applying_shared_selection = False
+            if state.get("kind") == "mode":
+                self.selection_sync_seen = marker
+            return
+        if (self.scene == "result" and state.get("extra")
+                and self.loading_phase is None and self.extra_charts_by_mode.get("4k")):
+            self.extra_challenge_prompt = False
+            self._start_loading("select", self._show_extra_select)
+            return
+        if self.scene != "select" or state.get("kind") == "mode":
+            return
+        extra = bool(state.get("extra"))
+        if extra != bool(getattr(self, "extra_stage_active", False)):
+            if extra and self.extra_charts_by_mode.get("4k"):
+                self.extra_stage_active = True
+                self.game_mode = "4k"
+                self.charts = self.extra_charts_by_mode["4k"]
+                self.song_groups = group_charts_by_song(self.charts)
+            elif not extra:
+                self.extra_stage_active = False
+                self._apply_game_mode("4k")
+            else:
+                return
+        song = state.get("song_index")
+        difficulty = state.get("difficulty_index")
+        if not isinstance(song, int) or not 0 <= song < len(self.song_groups):
+            return
+        if not isinstance(difficulty, int) or not 0 <= difficulty < len(self.song_groups[song]):
+            return
+        chart = self.song_groups[song][difficulty]
+        if chart.path != state.get("chart_path"):
+            return
+        self.selection_sync_seen = marker
+        self.track_index = state.get("track_index", self.track_index)
+        self.song_index = song
+        self.difficulty_index = difficulty
+        self.track = chart
+        self.selection_phase = state.get("phase", "song")
+        if state.get("kind") == "next":
+            self.applying_shared_selection = True
+            try:
+                self.show_next()
+            finally:
+                self.applying_shared_selection = False
+        else:
+            self._build_scene()
+            self._schedule_select_preview(1.0)
+
+    def _clear_join_marker(self):
+        if getattr(self, "session_dir", None):
+            try:
+                os.unlink(self._join_marker())
+            except FileNotFoundError:
+                pass
+
+    def _joined_times(self):
+        joined = {}
+        for station in (1, 2):
+            try:
+                with open(self._join_marker(station), encoding="ascii") as marker:
+                    round_number, joined_at = marker.read().split()
+                if int(round_number) == getattr(self, "entry_round", 0):
+                    joined[station] = float(joined_at)
+            except (OSError, ValueError):
+                pass
+        return joined
+
+    def _joined_stations(self):
+        return list(self._joined_times())
+
+    def _entry_release_at(self):
+        decision = self._entry_decision()
+        if decision is None:
+            return None
+        return decision["at"]
+
+    def _game_ready_marker(self, station=None):
+        chart_id = hashlib.sha1(self.track.path.encode("utf-8")).hexdigest()[:12]
+        stage = f"{self.entry_round}_{self.track_index}_{int(bool(self.extra_stage_active))}_{chart_id}"
+        return os.path.join(self.session_dir, f"game_ready_{stage}_{station or self.station}")
+
+    def _mark_game_ready(self):
+        temporary = self._game_ready_marker() + ".tmp"
+        with open(temporary, "w", encoding="ascii") as marker:
+            marker.write(f"{time.time():.9f}")
+        os.replace(temporary, self._game_ready_marker())
+
+    def _game_release_at(self):
+        ready = []
+        for station in (1, 2):
+            try:
+                with open(self._game_ready_marker(station), encoding="ascii") as marker:
+                    ready.append(float(marker.read()))
+            except (OSError, ValueError):
+                return None
+        return max(ready) + max(0.5, self.how_to_play_pre_roll)
+
+    def _refresh_entry_joined(self):
+        joined = self._joined_stations()
+        waiting = bool(joined)
+        if getattr(self, "entry_card_item", None) is not None and waiting != getattr(self, "entry_waiting_visible", False):
+            self.canvas.itemconfigure(
+                self.entry_card_item,
+                image=self._asset_photo("entry_waiting") if waiting else self.entry_card_frames[0],
+            )
+            self.entry_waiting_visible = waiting
+        for station, item in enumerate(getattr(self, "entry_joined_items", ()), 1):
+            self.canvas.itemconfigure(item, state="normal" if station in joined else "hidden")
+            self.canvas.tag_raise(item)
+        return joined
+
+    def _join_entry(self):
+        if self.entry_joined:
+            return
+        path = self._entry_state_path()
+        with shared_lock(path):
+            state = self._entry_state()
+            if state.get("round") != self.entry_round or state.get("mode"):
+                return
+            joined_at = time.time()
+            temporary = self._join_marker() + ".tmp"
+            with open(temporary, "w", encoding="ascii") as marker:
+                marker.write(f"{self.entry_round} {joined_at:.9f}")
+            os.replace(temporary, self._join_marker())
+            self.entry_joined = True
+            joined = self._joined_times()
+            if len(joined) == 2:
+                self._write_entry_state({"round": self.entry_round, "mode": "duo",
+                                         "at": max(joined.values()) + 0.35})
+        self._play_sfx("ok.wav")
+        self._refresh_entry_joined()
+
+    def _start_single_entry(self):
+        path = self._entry_state_path()
+        with shared_lock(path):
+            state = self._entry_state()
+            if (state.get("round") != self.entry_round or state.get("mode")
+                    or set(self._joined_stations()) != {self.station}):
+                return
+            self._write_entry_state({"round": self.entry_round, "mode": "solo",
+                                     "station": self.station, "at": time.time() + 0.35})
+        self._play_sfx("start.wav")
 
     def _start_title_entry_morph(self):
         if self.scene != "title" or self.title_entry_morph_started is not None:
@@ -442,12 +756,12 @@ class MinigameFlowMixin:
         self._create_fade_overlay(0.0)
         self._print("[AnimationManager] entry to title intermission fade started")
 
-    def show_warning(self):
+    def show_warning(self, started_at=None):
         if self.scene != "entry":
             return
         self.scene = "warning"
         self._build_scene()
-        self.scene_started = time.monotonic()
+        self.scene_started = time.monotonic() if started_at is None else started_at
         self.warning_deadline = self.scene_started + 3.0
         self.root.after(120, lambda: self._play_sfx("card_show.wav") if self.scene == "warning" else None)
         self._print("[AnimationManager] warning visible, duration: 3 seconds")
@@ -464,20 +778,25 @@ class MinigameFlowMixin:
 
     def show_select(self):
         self.scene = "select"
+        duration = self.settings["select_seconds"]
+        if getattr(self, "extra_stage_active", False):
+            duration = min(30, duration)
+            self.selection_phase = "difficulty"
         self.result_fade_started = None
         self.result_select_morph_started = None
         self.result_transition_target = None
         self.select_morph_in_started = None
         self.select_morph_in_offset = 0.0
-        self.select_deadline = time.monotonic() + self.settings["select_seconds"]
+        self.select_deadline = time.monotonic() + duration
         self.select_fade_in_started = None
         self.audio.stop(250)
         self._build_scene()
         self.scene_started = time.monotonic()
-        self.select_deadline = self.scene_started + self.settings["select_seconds"]
+        self.select_deadline = self.scene_started + duration
         self._schedule_select_preview(1.0)
         self.root.after(140, lambda: self._play_sfx("card_show.wav") if self.scene == "select" else None)
         self._print(f"music select visible, songs: {len(self.song_groups)}, track: {self._track_key()}")
+        self._broadcast_selection("select", initial=True)
 
     def start_title_select_morph(self):
         if self.scene != "title":
@@ -491,8 +810,22 @@ class MinigameFlowMixin:
         self._print("[AnimationManager] title to music select morph started")
 
     def show_next(self):
+        if getattr(self, "loading_phase", None) is not None:
+            return
+        if (getattr(self, "solo_active", False)
+                and self.station != self._entry_controller_station()
+                and not getattr(self, "applying_shared_selection", False)):
+            return
+        if self.scene == "select" and not getattr(self, "applying_shared_selection", False):
+            if not self._broadcast_selection("next"):
+                return
         if getattr(self, "settings_phase", None) is not None:
             self._clear_settings_overlay()
+        if getattr(self, "extra_stage_active", False) and self.scene == "select":
+            self.next_audio_channel = None
+            self.audio.stop(480)
+            self._start_loading("game", self._start_game_scene)
+            return
         self.scene = "next"
         self.next_audio_started = False
         self.next_audio_channel = None
@@ -545,6 +878,8 @@ class MinigameFlowMixin:
                 setattr(self, attribute, None)
 
     def _update_timer(self, item, remaining, shown_attribute, size=52):
+        if shown_attribute == "select_time_shown" and getattr(self, "extra_stage_active", False):
+            size = 64
         shown = getattr(self, shown_attribute)
         if item is not None and remaining != shown:
             self.canvas.itemconfigure(item, image=self._text(str(remaining), size))
@@ -609,8 +944,13 @@ class MinigameFlowMixin:
         self.how_to_play_mode = (
             tutorial if scene == "game" and tutorial not in getattr(self, "seen_tutorials", set()) else None
         )
+        if (getattr(self, "solo_active", False)
+                and self.station != self._entry_controller_station()):
+            self.how_to_play_mode = None
         self.how_to_play_pre_roll = pre_roll
-        self.game_started = None if self.how_to_play_mode is not None else self.scene_started + pre_roll
+        self.game_started = None if self.how_to_play_mode is not None or (
+            getattr(self, "two_player", False) and scene == "game"
+        ) else self.scene_started + pre_roll
         self.game_audio_started = False
         self.game_audio_offset = audio_offset
         self.gameplay = GameSession.for_mode(self.game_mode)
@@ -645,7 +985,11 @@ class MinigameFlowMixin:
             self.game_audio_job = None
             self._print(f"how to play visible: {self.how_to_play_mode.upper()}")
         else:
-            self.game_audio_job = self.root.after(round(pre_roll * 1000), self._start_chart_audio)
+            if getattr(self, "two_player", False) and scene == "game":
+                self._mark_game_ready()
+                self.game_audio_job = self.root.after(30, self._start_chart_audio)
+            else:
+                self.game_audio_job = self.root.after(round(pre_roll * 1000), self._start_chart_audio)
 
     def _dismiss_how_to_play(self):
         tutorial = getattr(self, "how_to_play_mode", None)
@@ -658,8 +1002,13 @@ class MinigameFlowMixin:
             save_seen_tutorials(self.progress_path, self.seen_tutorials)
         except OSError as error:
             self._print(f"how to play progress save failed: {error}")
-        self.game_started = time.monotonic() + self.how_to_play_pre_roll
-        self.game_audio_job = self.root.after(round(self.how_to_play_pre_roll * 1000), self._start_chart_audio)
+        if getattr(self, "two_player", False):
+            self.game_started = None
+            self._mark_game_ready()
+            self.game_audio_job = self.root.after(30, self._start_chart_audio)
+        else:
+            self.game_started = time.monotonic() + self.how_to_play_pre_roll
+            self.game_audio_job = self.root.after(round(self.how_to_play_pre_roll * 1000), self._start_chart_audio)
         self._print(f"how to play closed: {tutorial.upper()}")
 
     def _demonstration_candidates(self, mode=None):
@@ -734,6 +1083,15 @@ class MinigameFlowMixin:
         self.game_audio_job = None
         if not self.running or self.scene not in ("game", "demonstration"):
             return
+        if getattr(self, "two_player", False) and self.scene == "game":
+            release_at = self._game_release_at()
+            if release_at is None:
+                self.game_audio_job = self.root.after(30, self._start_chart_audio)
+                return
+            remaining = release_at - time.time()
+            if remaining > 0.002:
+                self.game_audio_job = self.root.after(max(1, round(remaining * 1000)), self._start_chart_audio)
+                return
         self.audio.play(self.track.audio_path, start_seconds=self.game_audio_offset)
         self.game_started = time.monotonic()
         self.game_audio_started = True

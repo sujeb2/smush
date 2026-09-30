@@ -1,6 +1,6 @@
 import os
-from PIL import Image, ImageDraw, ImageFont
-from ui_framework import DESIGN_WIDTH
+from PIL import Image, ImageChops, ImageDraw, ImageFont
+from ui_framework import DESIGN_HEIGHT, DESIGN_WIDTH
 
 IMAGE_PATHS = {
     "particle": ("generic", "bg_particle.png"),
@@ -13,6 +13,10 @@ IMAGE_PATHS = {
     "entry": ("generic", "entry", "entry.png"),
     "entry_cancel": ("generic", "entry", "entry_cancel.png"),
     "entry_guest": ("generic", "entry", "entry_guest.png"),
+    "entry_waiting": ("generic", "entry", "entry_waiting.png"),
+    "rival_joined": ("generic", "entry", "rival", "rival_joined.png"),
+    "rival_1st": ("game", "rival", "rival_1st.png"),
+    "rival_2nd": ("game", "rival", "rival_2nd.png"),
     "warning": ("generic", "warn.png"),
     "information": ("generic", "information.png"),
     "gameengine": ("generic", "gameengine.png"),
@@ -34,6 +38,7 @@ IMAGE_PATHS = {
     "previous": ("music_select", "prev_music.png"),
     "next_arrow": ("music_select", "next_arrow.png"),
     "extra_mode_warning": ("music_select", "extra_mode_warning.png"),
+    "extra_stage_ui": ("music_select", "extra_stage_ui.png"),
     "main_layer_4k_extra": ("game", "4k_extra", "main_layer.png"),
     "note_extra_0": ("game", "4k_extra", "sidenote_1.png"),
     "note_extra_1": ("game", "4k_extra", "sidenote_2.png"),
@@ -117,6 +122,14 @@ def _fit_mode_icon(source):
     return frame
 
 
+def _extra_stage_lettering(template, box):
+    label = template.crop(box)
+    red, green, blue, alpha = label.split()
+    ink = ImageChops.lighter(ImageChops.lighter(red, green), blue).point(lambda value: 255 if value > 80 else 0)
+    label.putalpha(ImageChops.multiply(alpha, ink))
+    return label.crop(label.getchannel("A").getbbox())
+
+
 def load_minigame_assets(base):
     image_root = os.path.join(base, "game", "imgs")
     sources = {
@@ -124,6 +137,28 @@ def load_minigame_assets(base):
         for name, parts in IMAGE_PATHS.items()
     }
     sources["select_bg"] = _remove_edge_outline(sources["select_bg"])
+    # Reflow the template for the taller display without stretching its lettering.
+    template = sources["extra_stage_ui"]
+    sources["extra_stage_header"] = _extra_stage_lettering(template, (0, 0, 1080, 130))
+    sources["extra_stage_settings_hint"] = _extra_stage_lettering(template, (0, 130, 1080, 180))
+    sources["extra_stage_footer"] = _extra_stage_lettering(template, (0, 1355, 1080, 1425))
+    for index, name in enumerate(("easy", "normal", "hard")):
+        sources[f"extra_stage_{name}"] = _extra_stage_lettering(
+            template, (index * 360, 1280, (index + 1) * 360, 1350),
+        )
+    shade = Image.new("RGBA", (1, DESIGN_HEIGHT))
+    for y in range(DESIGN_HEIGHT):
+        opacity = round(240 * max(0, min(1, (y / DESIGN_HEIGHT * 1450 - 1140) / 310)))
+        shade.putpixel((0, y), (0, 0, 0, opacity))
+    sources["extra_stage_ui"] = shade.resize((DESIGN_WIDTH, DESIGN_HEIGHT))
+    extra_background = Image.new("RGBA", (1, DESIGN_HEIGHT))
+    for y in range(DESIGN_HEIGHT):
+        progress = y / (DESIGN_HEIGHT - 1)
+        extra_background.putpixel((0, y), tuple(
+            round(start + (end - start) * progress)
+            for start, end in zip((102, 74, 152, 255), (190, 148, 236, 255))
+        ))
+    sources["extra_stage_background"] = extra_background.resize((DESIGN_WIDTH, DESIGN_HEIGHT))
     sources["previous"] = _remove_edge_outline(sources["previous"])
     for name in ("mode_4k", "mode_catch"):
         sources[name] = _fit_mode_icon(sources[name])

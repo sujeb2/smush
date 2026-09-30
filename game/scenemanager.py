@@ -1,10 +1,44 @@
 import math
+import os
 import time
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 from game.rules import EVENT_TRACK_COUNT, TEXT_SCALE
 from ui_framework import DESIGN_HEIGHT, DESIGN_WIDTH
+
+
+def _is_japanese_title(title):
+    return any(
+        "\u3040" <= character <= "\u30ff" or "\u3400" <= character <= "\u9fff"
+        or "\uff65" <= character <= "\uff9f"
+        for character in title
+    )
+
+
+def _extra_stage_levels(charts, selected=None):
+    """Place available charts under the template's EASY, NORMAL, HARD labels."""
+    slots = [None, None, None]
+    remaining = []
+    for chart in charts:
+        name = chart.difficulty.casefold()
+        if any(word in name for word in ("easy", "beginner", "novice")):
+            slot = 0
+        elif any(word in name for word in ("normal", "standard")):
+            slot = 1
+        elif any(word in name for word in ("hard", "another", "expert", "insane")):
+            slot = 2
+        else:
+            remaining.append(chart)
+            continue
+        if slots[slot] is None or chart is selected or (slots[slot] is not selected and chart.level > slots[slot].level):
+            slots[slot] = chart
+    remaining = sorted(remaining, key=lambda item: item.level)[-3:]
+    free_slots = [index for index, chart in enumerate(slots) if chart is None]
+    for index, chart in zip(free_slots[-len(remaining):], remaining):
+        slots[index] = chart
+    return slots
+
 
 class MinigameSceneMixin:
     def _build_scene(self):
@@ -122,6 +156,9 @@ class MinigameSceneMixin:
                 self._build_demonstration_overlay()
             elif getattr(self, "how_to_play_mode", None) is not None:
                 self._build_how_to_play()
+            return
+        if self.scene == "select" and getattr(self, "extra_stage_active", False):
+            self._build_select()
             return
         self._image("top_gradient", 0, 0, anchor="nw", tags=("background",))
         if self.scene == "ci":
@@ -368,14 +405,23 @@ class MinigameSceneMixin:
     def _build_entry(self):
         self._image("logo", 540, 270, tags=("entry",))
         self._text_image("ENTRY", 54, 70, 755, anchor="w", tags=("entry",))
-        self._text_image("TIME LEFT", 18, 970, 725, tags=("entry", "entry_time"))
-        remaining = max(0, int(self.entry_deadline - time.monotonic() + 0.999))
-        self.entry_time_item = self._text_image(str(remaining), 52, 970, 780, tags=("entry_time",))
-        self.entry_time_shown = remaining
+        if not getattr(self, "two_player", False):
+            self._text_image("TIME LEFT", 18, 970, 725, tags=("entry", "entry_time"))
+            remaining = max(0, int(self.entry_deadline - time.monotonic() + 0.999))
+            self.entry_time_item = self._text_image(str(remaining), 52, 970, 780, tags=("entry_time",))
+            self.entry_time_shown = remaining
         self.entry_card_frames = tuple(self._photo(frame) for frame in self._entry_card_sources())
         self.entry_card_item = self.canvas.create_image(
             self._x(540), self._y(1180), image=self.entry_card_frames[0], anchor="center", tags=("entry_card",),
         )
+        if getattr(self, "two_player", False):
+            self.entry_waiting_visible = False
+            joined = self._asset_photo("rival_joined")
+            self.entry_joined_items = (
+                self.canvas.create_image(self._x(440), self._y(1030), image=joined, state="hidden", tags=("entry_joined",)),
+                self.canvas.create_image(self._x(640), self._y(1030), image=joined, state="hidden", tags=("entry_joined",)),
+            )
+            self._refresh_entry_joined()
 
     def _build_warning(self):
         self._image("logo", 540, 270, tags=("warning",))
@@ -456,6 +502,9 @@ class MinigameSceneMixin:
         self.canvas.move("select", self.title_select_offset * self.scale, 0)
 
     def _build_select(self):
+        if getattr(self, "extra_stage_active", False):
+            self._build_extra_select()
+            return
         heading = "MUSIC SELECT" if self.selection_phase == "song" else "DIFFICULTY SELECT"
         self.selection_heading_item = self._text_image(heading, 54, 70, 755, anchor="w", tags=("select",))
         self._text_image("TIME LEFT", 18, 970, 725, tags=("select", "select_time"))
@@ -468,11 +517,82 @@ class MinigameSceneMixin:
         if getattr(self, "settings_phase", None) is not None:
             self._build_settings_overlay()
 
+    def _extra_stage_text(self, value, size, x, y, *, font_path, color="white", tracking=0,
+                          tags=("select", "select_list")):
+        font = ImageFont.truetype(font_path, size)
+        width = sum(font.getlength(character) for character in value) + tracking * max(0, len(value) - 1)
+        if width > 950:
+            factor = 950 / width
+            size = max(12, int(size * factor))
+            tracking *= factor
+            font = ImageFont.truetype(font_path, size)
+            width = sum(font.getlength(character) for character in value) + tracking * max(0, len(value) - 1)
+        box = font.getbbox(value)
+        source = Image.new("RGBA", (math.ceil(width) + 16, box[3] - box[1] + 16))
+        draw = ImageDraw.Draw(source)
+        cursor = 8
+        for character in value:
+            draw.text((cursor, 8 - box[1]), character, font=font, fill=color)
+            cursor += font.getlength(character) + tracking
+        photo = self._scaled_photo(source)
+        self.scene_photos.append(photo)
+        return self.canvas.create_image(
+            self._x(x), self._y(y), image=photo, anchor="center",
+            tags=tags,
+        )
+
+    def _build_extra_select(self):
+        self._image("extra_stage_background", 0, 0, anchor="nw", tags=("select",))
+        self._prepare_select_media(self.track, reset_video=True)
+        self.select_media_item = self.canvas.create_image(
+            self._x(0), self._y(0), image=self.select_media_photo or "",
+            anchor="nw", tags=("select", "extra_stage_media"),
+        )
+        self._image("extra_stage_ui", 0, 0, anchor="nw", tags=("select",))
+        self._image("extra_stage_header", 540, 132, tags=("select",))
+        self._text_image("TIME LEFT", 16, 955, 80, tags=("select", "select_time"))
+        remaining = max(0, min(30, math.ceil(self.select_deadline - time.monotonic())))
+        self.select_time_item = self._text_image(str(remaining), 64, 955, 145, tags=("select_time",))
+        self.select_time_shown = remaining
+        self._image("extra_stage_settings_hint", 540, 202, tags=("select",))
+        self._image("extra_stage_footer", 540, 1840, tags=("select",))
+        self._build_selection_list(("select", "select_list"))
+        if getattr(self, "settings_phase", None) is not None:
+            self._build_settings_overlay()
+
+    def _build_extra_selection_list(self):
+        self._prepare_select_media(self.track)
+        font_root = os.path.join(self.base, "files", "fonts")
+        ginza = os.path.join(font_root, "GinzaNarrow-Medium.otf")
+        japanese_title = _is_japanese_title(self.track.title)
+        title_font = os.path.join(font_root, "nagino.otf") if japanese_title else ginza
+        self._extra_stage_text(self.track.artist.upper(), 50, 540, 1385, font_path=ginza, tracking=14)
+        title = self.track.title if japanese_title else self.track.title.upper()
+        self._extra_stage_text(title, 100, 540, 1500, font_path=title_font, tracking=0 if japanese_title else 24)
+        slots = _extra_stage_levels(self.song_groups[self.song_index], selected=self.track)
+        for x, name, color, chart in zip((180, 540, 900), ("easy", "normal", "hard"),
+                                        ("#80ff84", "#ffdb80", "#ff8084"), slots):
+            selected = chart is self.track
+            label = self.sources[f"extra_stage_{name}"]
+            if selected or chart is None:
+                tinted = Image.new("RGBA", label.size, "white" if selected else "#786d86")
+                tinted.putalpha(label.getchannel("A"))
+                label = tinted
+            self.canvas.create_image(self._x(x), self._y(1745), image=self._photo(label),
+                                     tags=("select", "select_list"))
+            if chart is not None:
+                self._extra_stage_text(str(chart.level), 88, x, 1665,
+                                       font_path=self.novecento_demibold_font_path,
+                                       color=color if selected else "white", tracking=10)
+
     def _build_selection_shell(self, tags):
         self._image("select_bg", 32, 1110, anchor="nw", tags=tags)
         self.down_button_item = self._image("down_button", 540, self.down_button_base_y, tags=tags)
 
     def _build_selection_list(self, tags):
+        if getattr(self, "extra_stage_active", False):
+            self._build_extra_selection_list()
+            return
         if self.selection_phase == "song":
             choices = tuple(group[0].title for group in self.song_groups)
             selected = self.song_index

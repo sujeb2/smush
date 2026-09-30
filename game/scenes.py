@@ -1,6 +1,6 @@
 import math
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
-from game.rules import TEXT_SCALE
+from game.rules import TEXT_SCALE, calculate_accuracy, rank_for_accuracy
 from ui_framework import DESIGN_HEIGHT, DESIGN_WIDTH
 
 
@@ -46,6 +46,7 @@ class MinigameGameSceneMixin:
         self._text_image(self.track.title.upper(), title_size, 95, 310, anchor="w", tags=("game",))
         self._text_image("SCORE", 26, 990, 250, anchor="e", tags=("game",))
         self.score_item = self._text_image(str(self.score), 58, 990, 312, anchor="e", tags=("game_score",))
+        self._build_current_rank()
         extra = self.game_mode == "4k" and getattr(self, "extra_stage_active", False)
         self.health_fill_item = None
         if extra:
@@ -110,6 +111,44 @@ class MinigameGameSceneMixin:
         self._text_image(self.track.title.upper(), title_size, 95, 310, anchor="w", tags=("game",))
         self._text_image("SCORE", 26, 990, 250, anchor="e", tags=("game",))
         self.score_item = self._text_image(str(self.score), 58, 990, 312, anchor="e", tags=("game_score",))
+        self._build_current_rank()
+
+    def _build_current_rank(self):
+        if getattr(self, "two_player", False) and not getattr(self, "solo_active", False):
+            self.rival_rank_item = self._image("rival_1st", 975, 520, anchor="e", tags=("game_rival_rank",))
+            self.rival_rank_shown = "rival_1st"
+
+    def _update_current_rank(self):
+        if getattr(self, "current_rank_item", None) is None:
+            return
+        note_count = len(getattr(getattr(self, "track", None), "notes", ()))
+        rank = rank_for_accuracy(calculate_accuracy(getattr(self, "judgements", ()), note_count, self.game_mode == "catch"))
+        if rank == self.current_rank_shown:
+            return
+        colors = {"X": "#fff1b8", "S": "#ffe3a3", "A": "#c9f5ff", "B": "#d8f7cb", "C": "#f4d6ff", "D": "#e7e1ef"}
+        self.canvas.itemconfigure(self.current_rank_item, image=self._text(rank, 56, colors[rank]))
+        self.current_rank_shown = rank
+
+    def _update_rival_rank(self):
+        if (not getattr(self, "two_player", False) or getattr(self, "solo_active", False)
+                or getattr(self, "rival_rank_item", None) is None):
+            return
+        import os
+        path = os.path.join(self.session_dir, f"score_{self.station}")
+        temporary_path = path + ".tmp"
+        with open(temporary_path, "w", encoding="ascii") as score_file:
+            score_file.write(str(self.score))
+        os.replace(temporary_path, path)
+        other = 2 if self.station == 1 else 1
+        try:
+            with open(os.path.join(self.session_dir, f"score_{other}"), encoding="ascii") as score_file:
+                other_score = int(score_file.read())
+        except (OSError, ValueError):
+            other_score = 0
+        name = "rival_1st" if self.score >= other_score else "rival_2nd"
+        if name != self.rival_rank_shown:
+            self.canvas.itemconfigure(self.rival_rank_item, image=self._asset_photo(name))
+            self.rival_rank_shown = name
 
     def _build_catch_game(self):
         self.note_items = {}

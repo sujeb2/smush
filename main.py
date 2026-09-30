@@ -1,6 +1,7 @@
 import argparse
 import configparser
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -43,6 +44,17 @@ class Main:
         self.serial = None
         self.model = None
         self.args = args
+        if args.two_player or (args.demo and not args.headless and
+                               (args.minigame or config.getboolean("MINIGAME", "Enabled", fallback=False))):
+            command = [sys.executable, "-m", "game.minigame", "--players", "2"]
+            if args.windowed or args.demo:
+                command.append("--windowed")
+            else:
+                command.append("--fullscreen")
+            result = subprocess.run(command, cwd=base)
+            if result.returncode:
+                raise SystemExit(result.returncode)
+            return
         print(f"[{self.timestamp}] [main] smush starting, config loaded: {config.sections()}")
         print(f"[{self.timestamp}] [main] model path: {config['GENERIC']['ModelPath']}")
         if self._test_mode_enabled():
@@ -382,6 +394,7 @@ def parse_args():
     parser.add_argument("--skip-update", action="store_true")
     parser.add_argument("--test-mode", action="store_true")
     parser.add_argument("--minigame", action="store_true")
+    parser.add_argument("--two-player", action="store_true")
     parser.add_argument("--led-editor", action="store_true")
     return parser.parse_args()
 

@@ -58,9 +58,20 @@ class MinigameUI(
     MinigameAnimationMixin,
     ModernGLUIFramework,
 ):
-    def __init__(self, config_path, fullscreen=True, progress_path=None, test_mode_callback=None, demo_mode=False):
+    def __init__(self, config_path, fullscreen=True, progress_path=None, test_mode_callback=None, demo_mode=False,
+                 station=1, session_dir=None, monitor_geometry=None, borderless=True):
         self.settings = self._load_settings(config_path)
         super().__init__("SMUSH MINIGAME", fullscreen=fullscreen)
+        self.station = station
+        self.session_dir = session_dir
+        self.two_player = session_dir is not None
+        if self.two_player:
+            self.root.title(f"SMUSH MINIGAME - PLAYER {station}")
+        self.rival_scores = (0, 0)
+        if monitor_geometry is not None:
+            self.root.geometry(monitor_geometry)
+            if borderless:
+                self.root.overrideredirect(True)
         charts_root = os.path.join(self.base, self.settings["charts_root"])
         self.charts_by_mode, rejected = discover_osu_supported(
             charts_root, self.settings["event_chart_folders"], excluded_folders=("extrastage",),
@@ -155,6 +166,12 @@ class MinigameUI(
         super().show_unrecoverable_error(code, detail)
 
     def close(self):
+        if self.two_player:
+            self._clear_join_marker()
+            try:
+                os.unlink(os.path.join(self.session_dir, f"score_{self.station}"))
+            except FileNotFoundError:
+                pass
         self._close_leds()
         self._close_select_video()
         self._close_game_video()
@@ -163,12 +180,87 @@ class MinigameUI(
 
 def run_demo():
     import argparse
+    import subprocess
+    import sys
+    import tempfile
     parser = argparse.ArgumentParser()
     parser.add_argument("--windowed", action="store_true")
+    parser.add_argument("--fullscreen", action="store_true")
     parser.add_argument("--progress-file")
+    parser.add_argument("--players", type=int, choices=(1, 2), default=2)
+    parser.add_argument("--station", type=int, choices=(1, 2), default=1)
+    parser.add_argument("--session-dir")
+    parser.add_argument("--monitor-geometry")
+    parser.add_argument("--serial-port")
     args = parser.parse_args()
+    windowed = args.windowed or (args.players == 2 and not args.fullscreen)
+    if args.players == 2 and args.session_dir is None:
+        from game.displays import connected_monitors, station_geometries
+        monitors = connected_monitors()
+        if not monitors and windowed:
+            import tkinter as tk
+            probe = tk.Tk()
+            probe.withdraw()
+            monitors = [(0, 0, probe.winfo_screenwidth(), probe.winfo_screenheight())]
+            probe.destroy()
+        try:
+            geometries = station_geometries(monitors, windowed=windowed)
+        except ValueError as error:
+            raise SystemExit(str(error)) from error
+        with tempfile.TemporaryDirectory(prefix="smush-2p-") as session_dir:
+            children = []
+            for station, geometry in enumerate(geometries, 1):
+                command = [sys.executable, "-m", "game.minigame", "--station", str(station),
+                           "--session-dir", session_dir, "--monitor-geometry", geometry]
+                if windowed:
+                    command.append("--windowed")
+                else:
+                    command.append("--fullscreen")
+                if args.progress_file:
+                    command.extend(("--progress-file", args.progress_file))
+                port = os.environ.get(f"SMUSH_PLAYER_{station}_PORT")
+                if port:
+                    command.extend(("--serial-port", port))
+                children.append(subprocess.Popen(command, cwd=find_compiled_dir()))
+            try:
+                for child in children:
+                    child.wait()
+            finally:
+                for child in children:
+                    if child.poll() is None:
+                        child.terminate()
+        return
     config_path = os.path.join(find_compiled_dir(), "files", "main_conf.ini")
-    app = MinigameUI(config_path, fullscreen=not args.windowed, progress_path=args.progress_file, demo_mode=True)
+    progress_path = args.progress_file
+    if args.session_dir:
+        if progress_path is None:
+            progress_config = configparser.ConfigParser()
+            progress_config.read(config_path, encoding="utf-8")
+            progress_path = os.path.join(
+                find_compiled_dir(), progress_config.get("MINIGAME", "ProgressFile", fallback="game/minigame_progress.json"),
+            )
+        base_progress = progress_path
+        stem, extension = os.path.splitext(base_progress)
+        progress_path = f"{stem}_p{args.station}{extension}"
+    app = MinigameUI(config_path, fullscreen=not windowed and args.monitor_geometry is None,
+                     progress_path=progress_path, demo_mode=args.serial_port is None,
+                     station=args.station, session_dir=args.session_dir, monitor_geometry=args.monitor_geometry,
+                     borderless=not windowed)
+    if args.serial_port:
+        from serial_arduino import SerialIO
+        import threading
+        def connect():
+            try:
+                serial_config = configparser.ConfigParser()
+                serial_config.read(config_path, encoding="utf-8")
+                app.post_serial(SerialIO(
+                    args.serial_port,
+                    serial_config.getint("SERIAL", "SerialBaudrate", fallback=115200),
+                    serial_config.getint("SERIAL", "SerialTimeout", fallback=1),
+                ))
+            except Exception as error:
+                app.post_serial_failure(error)
+        threading.Thread(target=connect, daemon=True).start()
     app.run()
 
 

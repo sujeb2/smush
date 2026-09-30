@@ -112,6 +112,8 @@ class CanvasUIFramework:
         if self.unrecoverable_error:
             self._draw_unrecoverable_error()
             return
+        if not hasattr(self, "_build_scene"):
+            return
         if self.resize_job is not None:
             self.root.after_cancel(self.resize_job)
         self.resize_job = self.root.after(120, self._build_scene)
