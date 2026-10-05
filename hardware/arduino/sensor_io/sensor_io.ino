@@ -1,35 +1,66 @@
+#if defined(__AVR__)
+#include <avr/wdt.h>
+void disableWatchdogOnBoot() __attribute__((used, naked, section(".init3")));
+void disableWatchdogOnBoot() {
+  MCUSR = 0;
+  wdt_disable();
+}
+#elif defined(ARDUINO)
+#error "soft reset requires a classic AVR Arduino (for example, Uno R3)."
+#endif
 
-// conveyor
 #define CONV_A1 8
 #define CONV_A2 9
 #define CONV_B1 10
 #define CONV_B2 11
 
-#define CONV_SPEED 55
-#define CONV_FORWARD_FOR 5000
+#define CONV_ENABLE_A 12
+#define CONV_ENABLE_B 13
+#define CONV_STEPS_PER_SECOND 300UL // check down information for range
+#define CONV_HALF_STEP true
+#define CONV_START_STEPS_PER_SECOND 50UL
+#define CONV_RAMP_MS 1000UL
+#define CONV_REVERSE true
+#define CONV_FORWARD_FOR 6500UL
+
+#if CONV_STEPS_PER_SECOND == 0 || CONV_STEPS_PER_SECOND > 500000UL || CONV_START_STEPS_PER_SECOND == 0 || CONV_START_STEPS_PER_SECOND > 500000UL
+#error "Target and startup rates must be between 1 and 500000 full steps/s."
+#endif
+
+const unsigned long CONV_SUBSTEPS = CONV_HALF_STEP ? 2UL : 1UL;
 
 #define MOTOR_STEP_A 4
 #define MOTOR_STEP_B 3
 #define MOTOR_PWM 5
 #define MOTOR_SPEED 255
-#define MOTOR_FORWARD_FOR 500UL
-#define MOTOR_BRAKE_FOR 250UL
+#define MOTOR_RUNNING_FOR 13000UL
+#define MOTOR_RESET_TIME 3000UL
+#define MOTOR_BRAKE_FOR 150UL
 
 // debug
 #define DEBUG_CLK 6
 #define DEBUG_DIO 7
-#define DEBUG_READY 115
-#define DEBUG_READ 1001
-#define DEBUG_SENT 1002
-#define DEBUG_COMMAND_ERROR 9001
-#define DEBUG_BUSY_ERROR 9002
-#define DEBUG_SEND_ERROR 9003
+#define DEBUG_READY 1001
+#define DEBUG_READ 1101
+#define DEBUG_SENT 1102
+#define DEBUG_COMMAND_ERROR 1103
+#define DEBUG_BUSY_ERROR 1201
+#define DEBUG_SEND_ERROR 1202
+#define DEBUG_MOTOR_INIT 2001
 
-#include <L298NX2.h>
+#include "ConveyorStepper.h"
 #include <TM1637Display.h>
 
-L298NX2 conveyor(CONV_A1, CONV_A2, CONV_B1, CONV_B2);
+enum CrusherPhase { IDLE, CONVEYING, BUSY, PAUSED, RESETING, INITIALIZING };
+
+ConveyorStepper conveyor(CONV_A1, CONV_A2, CONV_B1, CONV_B2,
+                         CONV_ENABLE_A, CONV_ENABLE_B,
+                         1000000UL / (CONV_STEPS_PER_SECOND * CONV_SUBSTEPS),
+                         CONV_HALF_STEP,
+                         1000000UL / (CONV_START_STEPS_PER_SECOND * CONV_SUBSTEPS),
+                         CONV_RAMP_MS);
 TM1637Display debugDisplay(DEBUG_CLK, DEBUG_DIO);
+CrusherPhase motor_phase = IDLE;
 int debugCode = DEBUG_READY;
 int pendingDebugCode = DEBUG_READY;
 unsigned long debugStartTime = 0;
@@ -77,15 +108,63 @@ byte commandLength = 0;
 bool commandOverflow = false;
 
 void crusher_forward(int Speed);
+void crusher_backward(int Speed);
 void crusher_stop();
 
+void softwareReset() {
+  crusher_stop();
+  motor_phase = IDLE;
+  conveyor.stop();
+  conveyorRunning = false;
+  sendDebugMessage("resetting", true);
+  Serial.flush();
+#if defined(__AVR__)
+  noInterrupts();
+  wdt_reset();
+  wdt_enable(WDTO_15MS);
+  while(true) {}
+#endif
+}
+
 void updateCrusher() {
-  if(crusherRunning && millis() - crusherStartedAt >= MOTOR_FORWARD_FOR) {
-    crusher_stop();
+  const unsigned long curtime = millis();
+
+  switch (motor_phase) { // cruser status
+    case BUSY: // crusher running
+      sendDebugMessage("crushing_busy", true);
+      if(curtime - crusherStartedAt >= MOTOR_RUNNING_FOR) {
+        crusher_stop();
+        motor_phase = PAUSED;
+      }
+      break;
+    case PAUSED: // wait pause
+      if (curtime - crusherStoppedAt >= MOTOR_BRAKE_FOR) {
+        crusher_backward(MOTOR_SPEED);
+        crusherStartedAt = millis();
+        crusherRunning = true;
+        motor_phase = RESETING;
+      }
+      break;
+    case INITIALIZING:
+    case RESETING:
+    showDebug(DEBUG_BUSY_ERROR);
+      if (curtime - crusherStartedAt >=
+          (motor_phase == INITIALIZING ? MOTOR_RESET_TIME : MOTOR_RUNNING_FOR)) {
+        crusher_stop();
+        motor_phase = IDLE;
+        showDebug(DEBUG_READY);
+        sendDebugMessage("crushing_done", true);
+      }
+      break;
+    default: break;
   }
 }
 
 void handleCommand(const char *command) {
+  if(strcmp(command, "reset_soft") == 0) { // soft reset
+    softwareReset();
+    return;
+  }
   const bool object1 = strstr(command, "obj1_detect") != NULL;
   const bool object2 = strstr(command, "obj2_detect") != NULL;
   showDebug(DEBUG_READ);
@@ -93,17 +172,16 @@ void handleCommand(const char *command) {
     showDebug(DEBUG_COMMAND_ERROR);
     return;
   }
-  if(conveyorRunning || crusherRunning ||
-     millis() - crusherStoppedAt < MOTOR_BRAKE_FOR) {
+
+  if (conveyorRunning || crusherRunning || motor_phase != IDLE ||
+      millis() - crusherStoppedAt < MOTOR_BRAKE_FOR) { // motor, conv check
     showDebug(DEBUG_BUSY_ERROR);
     return;
   }
 
-  conveyor.reset();
+  conveyor.start(CONV_FORWARD_FOR, CONV_REVERSE);
   conveyorRunning = true;
-  crusher_forward(MOTOR_SPEED);
-  crusherStartedAt = millis();
-  crusherRunning = true;
+  motor_phase = CONVEYING;
   sendDebugMessage(object1 ? "obj_dropped1" : "obj_dropped2", false);
 }
 
@@ -129,18 +207,22 @@ void readCommands() {
 }
 
 void setup() {
+  conveyor.begin();
   pinMode(MOTOR_STEP_A, OUTPUT);
   pinMode(MOTOR_STEP_B, OUTPUT);
   pinMode(MOTOR_PWM, OUTPUT);
   crusher_stop();
 
-  debugDisplay.setBrightness(3);
+  debugDisplay.setBrightness(7);
   debugDisplay.showNumberDec(8888, true);
   Serial.begin(9600);
   while(!Serial);
-  sendDebugMessage("========= IO BOARD INIT =========", true);
-  conveyor.setSpeedA(CONV_SPEED);
-  conveyor.setSpeedB(CONV_SPEED);
+  sendDebugMessage("\n\n========= IO BOARD INIT =========\n", true);
+  debugDisplay.showNumberDec(DEBUG_MOTOR_INIT, true);
+  crusher_backward(MOTOR_SPEED);
+  crusherStartedAt = millis();
+  crusherRunning = true;
+  motor_phase = INITIALIZING;
 
   sendDebugMessage("read start", true);
 }
@@ -151,9 +233,15 @@ void loop() {
   readCommands();
 
   if(conveyorRunning) {
-    conveyor.forwardFor(CONV_FORWARD_FOR);
-    if(!conveyor.isMovingA() && !conveyor.isMovingB()) {
+    conveyor.update();
+    if(!conveyor.isMoving()) {
       conveyorRunning = false;
+      if(motor_phase == CONVEYING) {
+        crusher_forward(MOTOR_SPEED);
+        crusherStartedAt = millis();
+        crusherRunning = true;
+        motor_phase = BUSY;
+      }
     }
   }
 }

@@ -3,9 +3,10 @@ os.environ['TF_USE_LEGACY_KERAS'] = '1'
 
 from datetime import datetime
 import threading
+import time
 import traceback
 import cv2, numpy, torch, ultralytics
-from imageai.Detection import ObjectDetection, VideoObjectDetection
+from imageai.Detection import ObjectDetection
 from ultralytics import YOLO
 from ultralytics.nn import modules as utl_modules
 from ultralytics.nn.tasks import DetectionModel
@@ -117,13 +118,21 @@ class Model:
                 return self.fallbackLiveFeed(show_preview)
 
             while not self.captured:
+                busy, generation = self._recognition_state()
                 ret, frame = self.camera.read()
                 if not ret or frame is None:
                     print(f"[{self.timestamp}] [ModelRecog] failed to grab frame from camera.")
                     return 1
+                if busy or not self._recognition_allowed(generation):
+                    if show_preview:
+                        show_preview = self._preview_raw_frame(frame, wait_time_ms)
+                    time.sleep(0.05)
+                    continue
                 self.detections = self.predict(frame)
 
                 for result in self.detections:
+                    if not self._recognition_allowed(generation):
+                        break
                     if show_preview:
                         try:
                             cv2.imshow('feed', result.plot())
@@ -143,9 +152,9 @@ class Model:
                             expected = config['DETECTION'].get(f'ExpectedObject_{index}')
                             if expected and expected in self.names:
                                 if not self.serial_ignore:
-                                    self.serial.write(f"obj{index}_detect[{expected}]\n")
-                                    while self.serial.read():
-                                        pass
+                                    if not self.serial.write_detection(f"obj{index}_detect[{expected}]\n", generation):
+                                        self.names, self.confident, self.detections = [], [], []
+                                        break
                 if show_preview:
                     try:
                         key = cv2.waitKey(wait_time_ms) & 0xFF
@@ -173,6 +182,32 @@ class Model:
             options['conf'] = config['DETECTION'].getfloat('Confidence', fallback=0.5)
         return self.model.predict(source=source, stream=True, **options)
 
+    def _recognition_state(self):
+        if self.serial_ignore:
+            return False, 0
+        busy, generation = self.serial.poll_machine_status()
+        if busy:
+            self.names, self.confident, self.detections = [], [], []
+        return busy, generation
+
+    def _recognition_allowed(self, generation):
+        busy, current_generation = self._recognition_state()
+        allowed = not busy and current_generation == generation
+        if not allowed:
+            self.names, self.confident, self.detections = [], [], []
+        return allowed
+
+    def _preview_raw_frame(self, frame, wait_time_ms=1):
+        try:
+            cv2.imshow('feed', frame)
+            if cv2.waitKey(wait_time_ms) & 0xFF == ord('q'):
+                self.cancel_capture()
+            return True
+        except cv2.error:
+            traceback.print_exc()
+            self.closePreview()
+            return False
+
     def foundObjs(self, result):
         if result.probs is not None:
             confidence = float(result.probs.top1conf)
@@ -195,7 +230,7 @@ class Model:
 
     def fallbackLiveFeed(self, show_preview):
         self.execution_path = base
-        self.detector = VideoObjectDetection()
+        self.detector = ObjectDetection()
         if os.path.basename(self.model_path) == 'tiny-yolov3.pt':
             self.detector.setModelTypeAsTinyYOLOv3()
         else:
@@ -203,32 +238,45 @@ class Model:
         self.detector.setModelPath(self.model_path)
         self.detector.loadModel()
 
-        def livefeed(returned_frame):
-            nonlocal show_preview
-            if not show_preview:
-                return
-            try:
-                cv2.imshow('feed', returned_frame)
-                key = cv2.waitKey(1) & 0xFF
-            except cv2.error:
-                traceback.print_exc()
-                self.closePreview()
-                show_preview = False
-                return
-            if key == ord('q'):
-                self.camera.release()
-                self.cancel_capture()
-
-        video_path = self.detector.detectObjectsFromVideo(
-            camera_input=self.camera,
-            output_file_path=os.path.join(self.execution_path, "files", "captures", f"{self.timestamp}_camera_detected_video"),
-            frames_per_second=20,
-            log_progress=True,
-            minimum_percentage_probability=30,
-            per_frame_function=livefeed,
-            return_detected_frame=True,
-        )
-        print(f'[{self.timestamp}] [ModelRecog] {video_path}')
+        # Per-frame inference allows the same pause gate as the primary model.
+        video_path = os.path.join(base, "files", "captures", f"{self.timestamp}_camera_detected_video.avi")
+        writer = None
+        try:
+            while not self.captured:
+                busy, generation = self._recognition_state()
+                ret, frame = self.camera.read()
+                if not ret or frame is None:
+                    return 1
+                if writer is None:
+                    writer = cv2.VideoWriter(video_path, cv2.VideoWriter_fourcc(*"MJPG"),
+                                             20, (frame.shape[1], frame.shape[0]))
+                if busy or not self._recognition_allowed(generation):
+                    writer.write(frame)
+                    if show_preview:
+                        show_preview = self._preview_raw_frame(frame)
+                    time.sleep(0.05)
+                    continue
+                returned_frame, detections = self.detector.detectObjectsFromImage(
+                    input_image=frame, output_type="array", minimum_percentage_probability=30,
+                )
+                if not self._recognition_allowed(generation):
+                    writer.write(frame)
+                    continue
+                self.detections = detections
+                writer.write(returned_frame)
+                if show_preview:
+                    try:
+                        cv2.imshow('feed', returned_frame)
+                        if cv2.waitKey(1) & 0xFF == ord('q'):
+                            self.cancel_capture()
+                    except cv2.error:
+                        traceback.print_exc()
+                        self.closePreview()
+                        show_preview = False
+        finally:
+            if writer is not None:
+                writer.release()
+                print(f'[{self.timestamp}] [ModelRecog] {video_path}')
 
     def testCapture(self):
         print(f"[{self.timestamp}] [ModelRecog] Model load start.")

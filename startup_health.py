@@ -204,7 +204,7 @@ def check_runtime_files(base, required_paths=None, image_paths=None):
             os.path.join("files", "img", filename)
             for filename in (
                 "can.png", "cans.png", "ground_layer.png", "plastic_bottle.png",
-                "trash_can.png", "update_layer.png",
+                "trash_can.png", "update_layer.png", "crush_please_wait.png", "trash_full.png",
             )
         )
     _validate_configs(base)

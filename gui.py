@@ -57,6 +57,21 @@ class RecyclingUI(CanvasUIFramework):
         self.drop_frame = 0
         self.drop_sequence = 0
         self.firework_particles = []
+        self.crushing_busy = False
+        self.trash_full = False
+        self.status_card_kind = None
+        self.status_card_progress = 0.0
+        self.status_card_target = 0.0
+        self.status_card_job = None
+        self.status_card_id = None
+        self.status_card_duration = 0.45
+        self.status_sources = {
+            command: Image.open(os.path.join(self.base, "files", "img", filename)).convert("RGBA")
+            for command, filename in (
+                ("crushing_busy", "crush_please_wait.png"),
+                ("trash_full", "trash_full.png"),
+            )
+        }
         self.ground_source = Image.open(os.path.join(self.base, "files", "img", "ground_layer.png")).convert("RGBA")
         self.trash_source = Image.open(os.path.join(self.base, "files", "img", "trash_can.png")).convert("RGBA")
         self.cans_source = Image.open(os.path.join(self.base, "files", "img", "cans.png")).convert("RGBA")
@@ -187,6 +202,64 @@ class RecyclingUI(CanvasUIFramework):
             for material, source in self.drop_sources.items()
         }
         self.drop_id = self.canvas.create_image(self._x(540), self._y(-140), image=self.drop_photos["can"][0], anchor="center", state="hidden", tags="drop")
+        self.status_card_id = self.canvas.create_image(self._x(540), self._y(960), state="hidden", tags="status_card")
+        self._sync_status_card()
+        self._draw_status_card()
+
+    def _handle_machine_status(self, command):
+        if command == "crushing_busy":
+            self.crushing_busy = True
+        elif command in ("crushing_idle", "crushing_done"):
+            self.crushing_busy = False
+        elif command == "trash_full":
+            self.trash_full = True
+        self._sync_status_card()
+
+    def _sync_status_card(self):
+        # A full bin warning persists across crushing transitions.
+        desired = "trash_full" if self.trash_full else "crushing_busy" if self.crushing_busy else None
+        target = 1.0 if desired else 0.0
+        changed = desired is not None and desired != self.status_card_kind
+        if changed:
+            self.status_card_progress = 0.0
+        if desired is not None:
+            self.status_card_kind = desired
+        if target == self.status_card_target and not changed:
+            self._draw_status_card()
+            return
+        self.status_card_target = target
+        self.status_card_from = self.status_card_progress
+        self.status_card_started = time.monotonic()
+        if self.status_card_job is not None:
+            self.root.after_cancel(self.status_card_job)
+            self.status_card_job = None
+        self._animate_status_card()
+
+    def _animate_status_card(self):
+        self.status_card_job = None
+        if not self.running or self.screen_state == "error":
+            return
+        elapsed = min(1.0, (time.monotonic() - self.status_card_started) / self.status_card_duration)
+        eased = (1.0 - math.cos(math.pi * elapsed)) / 2.0
+        self.status_card_progress = self.status_card_from + (self.status_card_target - self.status_card_from) * eased
+        if elapsed >= 1.0 and self.status_card_target == 0.0:
+            self.status_card_kind = None
+        self._draw_status_card()
+        if elapsed < 1.0:
+            self.status_card_job = self.root.after(16, self._animate_status_card)
+
+    def _draw_status_card(self):
+        if self.screen_state != "ready" or self.status_card_id is None:
+            return
+        if self.status_card_kind is None or self.status_card_progress <= 0.0:
+            self.canvas.itemconfigure(self.status_card_id, state="hidden")
+            return
+        source = self.status_sources[self.status_card_kind]
+        size = (max(1, round(source.width * self.scale)),
+                max(1, round(source.height * self.scale * self.status_card_progress)))
+        self.status_card_photo = ImageTk.PhotoImage(source.resize(size, Image.Resampling.LANCZOS))
+        self.canvas.itemconfigure(self.status_card_id, image=self.status_card_photo, state="normal")
+        self.canvas.tag_raise(self.status_card_id)
 
     def _build_startup_scene(self):
         self.canvas.create_rectangle(
@@ -384,9 +457,10 @@ class RecyclingUI(CanvasUIFramework):
         self._drain_serial_buffer()
 
     def _drain_serial_buffer(self, force=False):
+        commands = (*self.serial_messages, "crushing_busy", "crushing_idle", "crushing_done", "trash_full")
         while True:
             matches = []
-            for serial_message in self.serial_messages:
+            for serial_message in commands:
                 position = self.serial_buffer.find(serial_message)
                 if position >= 0:
                     matches.append((position, serial_message))
@@ -396,12 +470,15 @@ class RecyclingUI(CanvasUIFramework):
             message_end = position + len(serial_message)
             longer_message_possible = any(
                 candidate.startswith(serial_message) and len(candidate) > len(serial_message)
-                for candidate in self.serial_messages
+                for candidate in commands
             )
             if not force and message_end == len(self.serial_buffer) and longer_message_possible:
                 break
             self.serial_buffer = self.serial_buffer[position + len(serial_message):]
-            self.trigger_recycle(self.serial_materials[serial_message])
+            if serial_message in ("crushing_busy", "crushing_idle", "crushing_done", "trash_full"):
+                self._handle_machine_status(serial_message)
+            else:
+                self.trigger_recycle(self.serial_materials[serial_message])
         self.serial_buffer = self.serial_buffer[-256:]
 
     def _poll_serial(self):
