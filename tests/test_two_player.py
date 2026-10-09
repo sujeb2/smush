@@ -1,3 +1,4 @@
+import os
 import tempfile
 import time
 import unittest
@@ -8,6 +9,7 @@ from game.gameflow import MinigameFlowMixin
 from game.displays import station_geometries
 from game.selection_sync import read_selection
 from game.AnimationFramework import MinigameAnimationMixin
+from game.scenes import MinigameGameSceneMixin
 from game.AssetWorker import IMAGE_PATHS
 
 
@@ -36,6 +38,7 @@ class SelectionStation(EntryStation):
         self.selection_phase = "song"
         self.track = charts[0][0]
         self.rebuilt = 0
+        self.wheel_turns = 0
         self.next_seen = False
         self.mode_confirmed = False
         self.loading_phase = None
@@ -43,6 +46,9 @@ class SelectionStation(EntryStation):
 
     def _build_scene(self):
         self.rebuilt += 1
+
+    def _start_selection_wheel(self, direction):
+        self.wheel_turns += direction
 
     def _schedule_select_preview(self, delay):
         pass
@@ -216,6 +222,21 @@ class TwoPlayerEntryTests(unittest.TestCase):
             self.assertTrue(first.next_seen)
             self.assertEqual(read_selection(first._selection_sync_path())["chart_path"], "song-a")
 
+    def test_rival_single_step_turns_the_wheel_and_jumps_rebuild(self):
+        charts = tuple((SimpleNamespace(path=f"song-{index}"),) for index in range(5))
+        with tempfile.TemporaryDirectory() as session_dir:
+            first = SelectionStation(session_dir, 1, charts)
+            second = SelectionStation(session_dir, 2, charts)
+            first.song_index, first.track = 1, charts[1][0]
+            first._broadcast_selection("select")
+            second._poll_shared_selection()
+            self.assertEqual((second.wheel_turns, second._build_scene.call_count), (1, 0))
+            first.song_index, first.track = 4, charts[4][0]
+            first._broadcast_selection("select")
+            second._poll_shared_selection()
+            self.assertEqual((second.wheel_turns, second._build_scene.call_count), (1, 1))
+            self.assertEqual(second.track.path, "song-4")
+
     def test_player_two_follows_mode_confirmation(self):
         charts = ((SimpleNamespace(path="song-a"),),)
         with tempfile.TemporaryDirectory() as session_dir:
@@ -341,6 +362,137 @@ class TwoPlayerEntryTests(unittest.TestCase):
             first.entry_round = 2
             self.assertEqual(first._joined_stations(), [])
             self.assertIsNone(first._entry_release_at())
+
+
+class FlowStation(MinigameFlowMixin, MinigameGameSceneMixin):
+
+    def __init__(self, session_dir, station, cleared=True, scene="result"):
+        self.two_player = True
+        self.session_dir = session_dir
+        self.station = station
+        self.entry_round = 1
+        self.scene = scene
+        self.scene_started = time.monotonic() - 10.0
+        self.loading_phase = None
+        self.track_index = 0
+        self.extra_stage_active = False
+        self.health = 100.0 if cleared else 0.0
+        self.result_unlock_at = 0.0
+        self.track_scores = [0] * 3
+        self.track_names = [""] * 3
+        self.track_ranks = [""] * 3
+        self.progress_path = os.path.join(session_dir, f"progress_{station}.json")
+        self.extra_charts_by_mode = {"4k": (object(),), "catch": ()}
+        self.extra_challenge_prompt = False
+        self.extra_challenge_started = None
+        self.total_result_count_channel = None
+        self.game_ended_exit_started = None
+        self.audio = Mock()
+        self._play_sfx = Mock()
+        self._stop_result_rank_audio = Mock()
+        self._print = Mock()
+        self.loading_targets = []
+
+    def _start_loading(self, target, action):
+        self.loading_targets.append(target)
+        self.loading_phase = "fading_out"
+
+
+class TwoPlayerFlowTests(unittest.TestCase):
+    def publish_results(self, *stations, extra=False):
+        for station in stations:
+            station._publish_station_result(extra)
+
+    def test_result_to_music_select_follows_rival_even_when_one_player_failed(self):
+        for initiating_station in (1, 2):
+            with self.subTest(station=initiating_station), tempfile.TemporaryDirectory() as session_dir:
+                stations = (FlowStation(session_dir, 1, cleared=True), FlowStation(session_dir, 2, cleared=False))
+                self.publish_results(*stations)
+                initiator = stations[initiating_station - 1]
+                follower = stations[2 - initiating_station]
+                initiator.start_result_transition()
+                self.assertEqual(follower.loading_targets, [])
+                follower._poll_flow()
+                for station in stations:
+                    self.assertEqual(station.loading_targets, ["select"])
+                    self.assertEqual(station.track_index, 1)
+
+    def test_both_failed_players_end_together(self):
+        with tempfile.TemporaryDirectory() as session_dir:
+            stations = (FlowStation(session_dir, 1, cleared=False), FlowStation(session_dir, 2, cleared=False))
+            self.publish_results(*stations)
+            stations[0].start_result_transition()
+            stations[1]._poll_flow()
+            self.assertEqual([station.loading_targets for station in stations], [["game_ended"], ["game_ended"]])
+
+    def test_first_decision_wins_when_both_players_press_at_once(self):
+        with tempfile.TemporaryDirectory() as session_dir:
+            first, second = FlowStation(session_dir, 1), FlowStation(session_dir, 2)
+            first.track_index = second.track_index = 2
+            self.publish_results(first, second, extra=True)
+            first.extra_challenge_prompt = True
+            first.extra_challenge_started = 0.0
+            first._accept_extra_challenge()
+            second.start_result_transition()
+            self.assertEqual(first.loading_targets, ["select"])
+            self.assertEqual(second.loading_targets, ["select"])
+            self.assertEqual((first.track_index, second.track_index), (0, 0))
+            first._poll_flow()
+            self.assertEqual(first.loading_targets, ["select"])
+
+    def test_total_result_and_game_ended_exits_are_shared(self):
+        with tempfile.TemporaryDirectory() as session_dir:
+            first = FlowStation(session_dir, 1, scene="total_result")
+            second = FlowStation(session_dir, 2, scene="total_result")
+            second.start_total_result_transition()
+            first._poll_flow()
+            self.assertEqual((first.loading_targets, second.loading_targets), (["game_ended"], ["game_ended"]))
+            for station in (first, second):
+                station.scene, station.loading_phase = "game_ended", None
+            first.start_game_ended_transition()
+            second._poll_flow()
+            self.assertIsNotNone(second.game_ended_exit_started)
+
+    def test_decision_from_an_earlier_stage_is_ignored(self):
+        with tempfile.TemporaryDirectory() as session_dir:
+            first, second = FlowStation(session_dir, 1), FlowStation(session_dir, 2)
+            self.publish_results(first, second)
+            first.start_result_transition()
+            second.track_index = 1
+            second._poll_flow()
+            self.assertEqual(second.loading_targets, [])
+
+    def test_rival_rank_compares_live_scores_and_ignores_previous_song(self):
+        with tempfile.TemporaryDirectory() as session_dir:
+            first = FlowStation(session_dir, 1, scene="game")
+            second = FlowStation(session_dir, 2, scene="game")
+            for station in (first, second):
+                station.canvas = Mock()
+                station._asset_photo = lambda name: name
+                station.rival_rank_item = 1
+                station.rival_rank_shown = "rival_1st_watermark"
+            second.track_index = 1
+            second.score = 90000
+            second._update_rival_rank()
+            first.score = 500
+            first._update_rival_rank()
+            self.assertEqual(first.rival_rank_shown, "rival_1st_watermark")
+            second.track_index = 0
+            second.score = 1000
+            second._update_rival_rank()
+            first._update_rival_rank()
+            self.assertEqual(first.rival_rank_shown, "rival_2nd_watermark")
+            self.assertEqual(second.rival_rank_shown, "rival_1st_watermark")
+
+    def test_rival_rank_updates_while_the_game_scene_is_running(self):
+        game = SimpleNamespace(
+            running=True, unrecoverable_error=False, two_player=True, solo_active=False, scene="game",
+            loading_phase=None, transition_phase=None, how_to_play_mode=None, root=Mock(),
+            _poll_events=Mock(), _follow_shared_entry=Mock(), _poll_flow=Mock(), _update_rival_rank=Mock(),
+            _animate_game_media=Mock(), _update_game_frame=Mock(), _animate=Mock(),
+        )
+        MinigameAnimationMixin._animate(game)
+        game._update_rival_rank.assert_called_once()
 
 
 if __name__ == "__main__":

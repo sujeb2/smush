@@ -122,6 +122,13 @@ def _fit_mode_icon(source):
     return frame
 
 
+def _rival_watermark(source, whiten=0.74, opacity=0.46):
+    """Wash the rival badge toward white and fade it into the info panel, keeping a hint of its tint."""
+    red, green, blue, alpha = source.convert("RGBA").split()
+    channels = [channel.point(lambda value: round(value + (255 - value) * whiten)) for channel in (red, green, blue)]
+    return Image.merge("RGBA", (*channels, alpha.point(lambda value: round(value * opacity))))
+
+
 def _extra_stage_lettering(template, box):
     label = template.crop(box)
     red, green, blue, alpha = label.split()
@@ -159,6 +166,8 @@ def load_minigame_assets(base):
             for start, end in zip((102, 74, 152, 255), (190, 148, 236, 255))
         ))
     sources["extra_stage_background"] = extra_background.resize((DESIGN_WIDTH, DESIGN_HEIGHT))
+    for name in ("rival_1st", "rival_2nd"):
+        sources[f"{name}_watermark"] = _rival_watermark(sources[name])
     sources["previous"] = _remove_edge_outline(sources["previous"])
     for name in ("mode_4k", "mode_catch"):
         sources[name] = _fit_mode_icon(sources[name])

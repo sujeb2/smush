@@ -1,5 +1,6 @@
 import queue
 import time
+from collections import OrderedDict
 
 from game.rules import JUDGEMENT_WEIGHT
 from game.session import GameSession
@@ -55,7 +56,7 @@ class MinigameStateMixin:
     def _initialize_render_state(self):
         self.scene_photos = []
         self.photo_cache = {}
-        self.text_cache = {}
+        self.text_cache = OrderedDict()
         self.motion_photo_cache = {}
         self.fade_photo_cache = {}
         self.scroll_items = []
@@ -199,11 +200,9 @@ class MinigameStateMixin:
         self.select_video_frame_interval = 1 / 30
         self.select_video_next_frame = 0.0
         self.selection_scroll_started = None
-        self.selection_old_offset = 0.0
-        self.selection_new_offset = 0.0
-        self.selection_old_x = 0.0
-        self.selection_new_x = 0.0
-        self.selection_scroll_swapped = False
+        self.selection_card_swapped = True
+        self.selection_preview_items = []
+        self.selection_card_bg_item = None
         self.selection_heading_item = None
         self.selection_sweep_item = None
         self.select_morph_in_started = None

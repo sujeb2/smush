@@ -1,6 +1,8 @@
 import math
+import os
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from game.rules import TEXT_SCALE, calculate_accuracy, rank_for_accuracy
+from game.selection_sync import read_selection, write_json
 from ui_framework import DESIGN_HEIGHT, DESIGN_WIDTH
 
 
@@ -38,16 +40,8 @@ class MinigameGameSceneMixin:
             self._x(0), self._y(0), self._x(DESIGN_WIDTH), self._y(DESIGN_HEIGHT),
             fill="#8d73aa", outline="", tags=("game",),
         )
-        self._build_game_media()
-        self._image("top_gradient", 0, 0, anchor="nw", tags=("game",))
-        self._build_header()
-        self._text_image(self.track.difficulty, 26, 95, 250, anchor="w", tags=("game",)) # beatmap diff need to change
-        title_size = 47 if len(self.track.title) <= 20 else max(30, round(47 * 20 / len(self.track.title)))
-        self._text_image(self.track.title.upper(), title_size, 95, 310, anchor="w", tags=("game",))
-        self._text_image("SCORE", 26, 990, 250, anchor="e", tags=("game",))
-        self.score_item = self._text_image(str(self.score), 58, 990, 312, anchor="e", tags=("game_score",))
-        self._build_current_rank()
-        extra = self.game_mode == "4k" and getattr(self, "extra_stage_active", False)
+        self._build_game_information()
+        extra =self.game_mode == "4k" and getattr(self, "extra_stage_active", False)
         self.health_fill_item = None
         if extra:
             self.lane_origin_x = 169.0
@@ -106,17 +100,21 @@ class MinigameGameSceneMixin:
         self._build_game_media()
         self._image("top_gradient", 0, 0, anchor="nw", tags=("game",))
         self._build_header()
+        # Before the panel text so the rival watermark sits behind the score.
+        self._build_current_rank()
         self._text_image(self.track.difficulty, 26, 95, 250, anchor="w", tags=("game",)) # beatmap diff need to change
         title_size = 47 if len(self.track.title) <= 20 else max(30, round(47 * 20 / len(self.track.title)))
         self._text_image(self.track.title.upper(), title_size, 95, 310, anchor="w", tags=("game",))
         self._text_image("SCORE", 26, 990, 250, anchor="e", tags=("game",))
         self.score_item = self._text_image(str(self.score), 58, 990, 312, anchor="e", tags=("game_score",))
-        self._build_current_rank()
 
     def _build_current_rank(self):
         if getattr(self, "two_player", False) and not getattr(self, "solo_active", False):
-            self.rival_rank_item = self._image("rival_1st", 975, 520, anchor="e", tags=("game_rival_rank",))
-            self.rival_rank_shown = "rival_1st"
+            # Right-aligned to the info panel's inner edge (top asset spans x 63-1016, y 182-407).
+            self.rival_rank_item = self._image(
+                "rival_1st_watermark", 1016, 197, anchor="ne", tags=("game_rival_rank",),
+            )
+            self.rival_rank_shown = "rival_1st_watermark"
 
     def _update_current_rank(self):
         if getattr(self, "current_rank_item", None) is None:
@@ -133,19 +131,18 @@ class MinigameGameSceneMixin:
         if (not getattr(self, "two_player", False) or getattr(self, "solo_active", False)
                 or getattr(self, "rival_rank_item", None) is None):
             return
-        import os
-        path = os.path.join(self.session_dir, f"score_{self.station}")
-        temporary_path = path + ".tmp"
-        with open(temporary_path, "w", encoding="ascii") as score_file:
-            score_file.write(str(self.score))
-        os.replace(temporary_path, path)
-        other = 2 if self.station == 1 else 1
+        # Tagged with the stage so the rival's final score from the previous song is never compared.
+        stage = self._flow_stage("game")
         try:
-            with open(os.path.join(self.session_dir, f"score_{other}"), encoding="ascii") as score_file:
-                other_score = int(score_file.read())
-        except (OSError, ValueError):
-            other_score = 0
-        name = "rival_1st" if self.score >= other_score else "rival_2nd"
+            write_json(os.path.join(self.session_dir, f"score_{self.station}"), {"stage": stage, "score": self.score})
+        except OSError as error:
+            self._print(f"[FlowSync] score publish failed: {error}")
+        other = 2 if self.station == 1 else 1
+        rival = read_selection(os.path.join(self.session_dir, f"score_{other}"))
+        other_score = 0
+        if isinstance(rival, dict) and rival.get("stage") == stage and isinstance(rival.get("score"), int):
+            other_score = rival["score"]
+        name = "rival_1st_watermark" if self.score >= other_score else "rival_2nd_watermark"
         if name != self.rival_rank_shown:
             self.canvas.itemconfigure(self.rival_rank_item, image=self._asset_photo(name))
             self.rival_rank_shown = name

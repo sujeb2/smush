@@ -145,6 +145,11 @@ class MinigameResultSceneMixin:
     def _animate_extra_challenge_prompt(self, now):
         if not getattr(self, "extra_challenge_prompt", False) or now < self.result_unlock_at:
             return
+        if self.extra_challenge_started is None and getattr(self, "two_player", False) and self._flow_synced():
+            # Both stations offer the challenge if either player qualified.
+            if not self._joint_result()[1]:
+                self.extra_challenge_prompt = False
+                return
         if self.extra_challenge_started is None:
             self.extra_challenge_started = now
             self._play_sfx("information.wav")

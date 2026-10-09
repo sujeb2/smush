@@ -129,6 +129,8 @@ class _CanvasItem:
     width: float = 1.0
     state: str = "normal"
     scale_y: float = 1.0
+    pivot_y: float = None
+    opacity: float = 1.0
 
 
 class ModernGLCanvas:
@@ -302,28 +304,42 @@ class ModernGLCanvas:
             y -= height
         return x, y
 
+    def _item_box(self, item):
+        if item.kind == "image":
+            width, full_height = item.image.width, item.image.height
+            if item.pivot_y is None:
+                height = full_height * item.scale_y
+                x, y = self._image_origin(item.coords[0], item.coords[1], width, height, item.anchor)
+                return x, y, width, height
+            x, y = self._image_origin(item.coords[0], item.coords[1], width, full_height, item.anchor)
+        else:
+            x1, y1, x2, y2 = item.coords
+            x, y = min(x1, x2), min(y1, y2)
+            width, full_height = abs(x2 - x1), abs(y2 - y1)
+            if item.pivot_y is None:
+                return x, y, width, full_height
+        return x, item.pivot_y + (y - item.pivot_y) * item.scale_y, width, full_height * item.scale_y
+
+    @staticmethod
+    def _faded(color, opacity):
+        return color if opacity >= 1.0 else (*color[:3], color[3] * max(0.0, opacity))
+
     def _render_item(self, item):
-        if item.state == "hidden":
+        if item.state == "hidden" or item.opacity <= 0:
             return
         if item.kind == "image":
             if not isinstance(item.image, Image.Image):
                 return
-            height = item.image.height * item.scale_y
-            x, y = self._image_origin(
-                item.coords[0], item.coords[1], item.image.width, height, item.anchor,
-            )
-            self._draw_quad(x, y, item.image.width, height, item.image, (1, 1, 1, 1))
+            x, y, width, height = self._item_box(item)
+            self._draw_quad(x, y, width, height, item.image, self._faded((1, 1, 1, 1), item.opacity))
             return
-        x1, y1, x2, y2 = item.coords
-        left, right = sorted((x1, x2))
-        top, bottom = sorted((y1, y2))
-        width = right - left
-        height = bottom - top
+        left, top, width, height = self._item_box(item)
+        right, bottom = left + width, top + height
         if item.fill:
-            self._draw_quad(left, top, width, height, self.white_image, _rgba(item.fill))
+            self._draw_quad(left, top, width, height, self.white_image, self._faded(_rgba(item.fill), item.opacity))
         if item.outline and item.width > 0:
             line = min(float(item.width), width / 2, height / 2)
-            color = _rgba(item.outline)
+            color = self._faded(_rgba(item.outline), item.opacity)
             self._draw_quad(left, top, width, line, self.white_image, color)
             self._draw_quad(left, bottom - line, width, line, self.white_image, color)
             self._draw_quad(left, top + line, line, max(0, height - 2 * line), self.white_image, color)
@@ -333,23 +349,33 @@ class ModernGLCanvas:
         image = Image.new("RGBA", (DESIGN_WIDTH, DESIGN_HEIGHT), "black")
         for item_id in self.order:
             item = self.items[item_id]
-            if item.state == "hidden":
+            if item.state == "hidden" or item.opacity <= 0:
                 continue
             if item.kind == "image" and isinstance(item.image, Image.Image):
                 if item.scale_y <= 0:
                     continue
+                x, y, _, height = self._item_box(item)
                 source = item.image.convert("RGBA")
-                if item.scale_y != 1.0:
-                    source = source.resize((source.width, max(1, round(source.height * item.scale_y))),
-                                           Image.Resampling.BILINEAR)
-                x, y = self._image_origin(*item.coords, source.width, source.height, item.anchor)
+                if round(height) != source.height:
+                    source = source.resize((source.width, max(1, round(height))), Image.Resampling.BILINEAR)
+                if item.opacity < 1.0:
+                    source.putalpha(source.getchannel("A").point(lambda value: round(value * item.opacity)))
                 image.alpha_composite(source, (round(x), round(y)))
             elif item.kind == "rectangle":
-                draw = ImageDraw.Draw(image)
-                x1, y1, x2, y2 = item.coords
-                draw.rectangle((min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)),
-                               fill=item.fill or None, outline=item.outline or None,
-                               width=max(1, round(item.width)))
+                left, top, width, height = self._item_box(item)
+                layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+
+                def color(value):
+                    if not value:
+                        return None
+                    rgba = self._faded(_rgba(value), item.opacity)
+                    return tuple(round(channel * 255) for channel in rgba)
+
+                ImageDraw.Draw(layer).rectangle(
+                    (left, top, left + width, top + height),
+                    fill=color(item.fill), outline=color(item.outline), width=max(1, round(item.width)),
+                )
+                image.alpha_composite(layer)
         return image
 
     def update_fps_overlay(self, text, font_path):

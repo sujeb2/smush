@@ -10,7 +10,7 @@ from datetime import datetime
 
 from dependency_updater import DependencyUpdateError, load_requirements, requirement_name, update_dependencies
 from gui import RecyclingUI
-from game.minigame import MinigameUI
+from game.minigame import MINIGAME_PROCESS_FLAG, MinigameUI, minigame_command, run_demo as run_minigame_process
 from serial_arduino import SerialIO
 from startup_health import (
     StartupHealthError,
@@ -46,7 +46,7 @@ class Main:
         self.args = args
         if args.two_player or (args.demo and not args.headless and
                                (args.minigame or config.getboolean("MINIGAME", "Enabled", fallback=False))):
-            command = [sys.executable, "-m", "game.minigame", "--players", "2"]
+            command = minigame_command("--players", "2")
             if args.windowed or args.demo:
                 command.append("--windowed")
             else:
@@ -400,6 +400,10 @@ def parse_args():
 
 
 def run():
+    if len(sys.argv) > 1 and sys.argv[1] == MINIGAME_PROCESS_FLAG:
+        sys.argv = [sys.argv[0], *sys.argv[2:]]
+        run_minigame_process()
+        return
     args = parse_args()
     if args.led_editor:
         from lededitor import run as run_led_editor

@@ -1,5 +1,6 @@
 import configparser
 import os
+import sys
 from datetime import datetime
 
 from game.AnimationFramework import MinigameAnimationMixin
@@ -178,10 +179,20 @@ class MinigameUI(
         self.audio.close()
         super().close()
 
+MINIGAME_PROCESS_FLAG = "--minigame-process"
+
+
+def minigame_command(*arguments):
+    """Command that runs run_demo() in a new process, from source or a frozen build."""
+    if "__compiled__" in globals() or getattr(sys, "frozen", False):
+        # A frozen executable cannot run `-m`; main.py routes this flag to run_demo().
+        return [sys.executable, MINIGAME_PROCESS_FLAG, *arguments]
+    return [sys.executable, "-m", "game.minigame", *arguments]
+
+
 def run_demo():
     import argparse
     import subprocess
-    import sys
     import tempfile
     parser = argparse.ArgumentParser()
     parser.add_argument("--windowed", action="store_true")
@@ -210,8 +221,8 @@ def run_demo():
         with tempfile.TemporaryDirectory(prefix="smush-2p-") as session_dir:
             children = []
             for station, geometry in enumerate(geometries, 1):
-                command = [sys.executable, "-m", "game.minigame", "--station", str(station),
-                           "--session-dir", session_dir, "--monitor-geometry", geometry]
+                command = minigame_command("--station", str(station),
+                                           "--session-dir", session_dir, "--monitor-geometry", geometry)
                 if windowed:
                     command.append("--windowed")
                 else:

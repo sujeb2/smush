@@ -1,7 +1,6 @@
-"""Small shared selection store for the two local game processes."""
-
 import json
 import os
+import time
 from contextlib import contextmanager
 
 
@@ -34,6 +33,21 @@ def read_selection(path):
             return json.load(stream)
     except (OSError, ValueError):
         return None
+
+
+def write_json(path, data, attempts=20):
+    """Atomically replace a shared file; Windows refuses while the other process is reading it."""
+    temporary = f"{path}.{os.getpid()}.tmp"
+    with open(temporary, "w", encoding="utf-8") as stream:
+        json.dump(data, stream)
+    for attempt in range(attempts):
+        try:
+            os.replace(temporary, path)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.005)
 
 
 @contextmanager

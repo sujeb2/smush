@@ -3,6 +3,7 @@ import queue
 import time
 
 from game.rules import CI_NOTICE_SECONDS, CI_WARNING_SECONDS, smooth_progress
+from game.scenemanager import SELECTION_WHEEL_SECONDS
 from ui_framework import DESIGN_WIDTH
 
 
@@ -12,10 +13,6 @@ class MinigameAnimationMixin:
                 and now - getattr(self, "selection_sync_checked_at", 0.0) >= 0.05):
             self.selection_sync_checked_at = now
             self._poll_shared_selection()
-        if (getattr(self, "two_player", False) and not getattr(self, "solo_active", False) and self.scene == "game"
-                and now - getattr(self, "rival_rank_checked_at", 0.0) >= 0.25):
-            self.rival_rank_checked_at = now
-            self._update_rival_rank()
         elapsed = now - self.animation_epoch
         if self.particle_item is not None:
             y = self.particle_base_y + 13 * math.sin(elapsed * 0.8)
@@ -274,43 +271,21 @@ class MinigameAnimationMixin:
     def _animate_selection_scroll(self, now):
         if self.selection_scroll_started is None:
             return
-        progress = min(1.0, (now - self.selection_scroll_started) / 0.52)
-        sweep_eased = progress * progress * (3 - 2 * progress)
-        if self.selection_sweep_item is not None:
-            self.canvas.coords(self.selection_sweep_item, self._x(-150 + 1380 * sweep_eased), self._y(1125))
-            self.canvas.tag_raise(self.selection_sweep_item)
-        if progress < 0.48:
-            part = progress / 0.48
-            eased = 1 - pow(1 - part, 3)
-            angle = eased * math.pi / 2
-            old_x = 250.0 * math.sin(angle)
-            old_offset = -180.0 * (1 - math.cos(angle))
-            old_x_delta = old_x - self.selection_old_x
-            old_delta = old_offset - self.selection_old_offset
-            self.canvas.move("select_old", old_x_delta * self.scale, old_delta * self.scale)
-            self.selection_old_x = old_x
-            self.selection_old_offset = old_offset
-            return
-        if not self.selection_scroll_swapped:
-            self.canvas.delete("select_old")
-            self.canvas.itemconfigure("select_new", state="normal")
-            self.selection_scroll_swapped = True
-        part = (progress - 0.48) / 0.52
-        eased = 1 - pow(1 - part, 3)
-        angle = (1 - eased) * math.pi / 2
-        new_x = 250.0 * math.sin(angle)
-        new_offset = 180.0 * (1 - math.cos(angle))
-        new_x_delta = new_x - self.selection_new_x
-        new_delta = new_offset - self.selection_new_offset
-        self.canvas.move("select_new", new_x_delta * self.scale, new_delta * self.scale)
-        self.selection_new_x = new_x
-        self.selection_new_offset = new_offset
+        progress = min(1.0, (now - self.selection_scroll_started) / SELECTION_WHEEL_SECONDS)
         if progress >= 1.0:
-            self.canvas.dtag("select_new", "select_new")
-            self.selection_scroll_started = None
-            if self.selection_sweep_item is not None:
-                self.canvas.delete(self.selection_sweep_item)
-                self.selection_sweep_item = None
+            self._finish_selection_wheel()
+            return
+        self._place_selection_previews(smooth_progress(progress))
+        flip_point = 0.45
+        if progress < flip_point:
+            # Old card rotates edge-on around its horizontal centre line.
+            self._flip_selection_card("select_card_old", math.cos(smooth_progress(progress / flip_point) * math.pi / 2))
+            return
+        if not self.selection_card_swapped:
+            self._swap_selection_card()
+        # New card rotates face-on with a small overshoot, like the arcade card pop.
+        part = (progress - flip_point) / (1.0 - flip_point) - 1.0
+        self._flip_selection_card("select_card", 1.0 + 2.6 * part ** 3 + 1.6 * part ** 2)
 
     def _animate_game_ended(self, now):
         elapsed = max(0.0, now - self.scene_started)
@@ -483,6 +458,13 @@ class MinigameAnimationMixin:
             return
         if getattr(self, "two_player", False):
             self._follow_shared_entry()
+            if now - getattr(self, "flow_checked_at", 0.0) >= 0.05:
+                self.flow_checked_at = now
+                self._poll_flow()
+            if (self.scene == "game" and not getattr(self, "solo_active", False)
+                    and now - getattr(self, "rival_rank_checked_at", 0.0) >= 0.25):
+                self.rival_rank_checked_at = now
+                self._update_rival_rank()
         if self.scene != "game":
             self._animate_common(now)
         if self.loading_phase is not None:

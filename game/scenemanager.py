@@ -7,6 +7,36 @@ from PIL import Image, ImageDraw, ImageFont
 from game.rules import EVENT_TRACK_COUNT, TEXT_SCALE
 from ui_framework import DESIGN_HEIGHT, DESIGN_WIDTH
 
+TEXT_CACHE_LIMIT = 512
+
+# Music select wheel: resting neighbour slots (±1, ±2) plus off-screen slots (±3) that cards
+# rotate in from, and the centre card (0) that the selected song turns into.
+SELECTION_WHEEL_REACH = 3
+SELECTION_WHEEL_SECONDS = 0.32
+_SELECTION_WHEEL_POINTS = {
+    -3: (1050, 850), -2: (950, 925), -1: (850, 1000), 0: (560, 1248),
+    1: (850, 1497), 2: (950, 1660), 3: (1050, 1823),
+}
+
+
+def _selection_wheel_point(offset):
+    """Position on a smooth (Catmull-Rom) arc through the wheel slots, for a fractional slot."""
+    reach = SELECTION_WHEEL_REACH
+    offset = min(reach, max(-reach, offset))
+    index = min(reach - 1, math.floor(offset))
+    t = offset - index
+    p0, p1, p2, p3 = (_SELECTION_WHEEL_POINTS[min(reach, max(-reach, slot))]
+                      for slot in (index - 1, index, index + 1, index + 2))
+    return tuple(
+        0.5 * (2 * b + (c - a) * t + (2 * a - 5 * b + 4 * c - d) * t * t + (3 * b - a - 3 * c + d) * t ** 3)
+        for a, b, c, d in zip(p0, p1, p2, p3)
+    )
+
+
+def _selection_wheel_opacity(offset):
+    """Cards fade as they turn into the centre card and as they leave past the outer slots."""
+    distance = abs(offset)
+    return min(1.0, distance) * min(1.0, max(0.0, SELECTION_WHEEL_REACH - distance))
 
 def _is_japanese_title(title):
     return any(
@@ -78,11 +108,9 @@ class MinigameSceneMixin:
         self.title_entry_logo_frames = ()
         self.title_entry_logo_frame_shown = -1
         self.selection_scroll_started = None
-        self.selection_old_offset = 0.0
-        self.selection_new_offset = 0.0
-        self.selection_old_x = 0.0
-        self.selection_new_x = 0.0
-        self.selection_scroll_swapped = False
+        self.selection_card_swapped = True
+        self.selection_preview_items = []
+        self.selection_card_bg_item = None
         self.selection_heading_item = None
         self.selection_sweep_item = None
         self.scroll_speed_warning_item = None
@@ -205,15 +233,23 @@ class MinigameSceneMixin:
 
     def _text(self, text, size, color="white", align="center"):
         key = text, size, color, align, round(self.scale, 5)
-        if key not in self.text_cache:
-            self.text_cache[key] = self._text_photo(
-                text,
-                round(size * TEXT_SCALE),
-                color=color,
-                font_path=self.novecento_demibold_font_path,
-                align=align,
-            )
-        return self.text_cache[key]
+        photo = self.text_cache.get(key)
+        if photo is not None:
+            self.text_cache.move_to_end(key)
+            return photo
+        photo = self._text_photo(
+            text,
+            round(size * TEXT_SCALE),
+            color=color,
+            font_path=self.novecento_demibold_font_path,
+            align=align,
+        )
+        self.text_cache[key] = photo
+        # Score and combo text changes every hit; bound the cache so evicted
+        # images (and their GPU textures) can be released.
+        while len(self.text_cache) > TEXT_CACHE_LIMIT:
+            self.text_cache.popitem(last=False)
+        return photo
 
     def _image(self, name, x, y, anchor="center", tags=()):
         return self.canvas.create_image(
@@ -586,40 +622,82 @@ class MinigameSceneMixin:
                                        color=color if selected else "white", tracking=10)
 
     def _build_selection_shell(self, tags):
-        self._image("select_bg", 32, 1110, anchor="nw", tags=tags)
+        self.selection_card_bg_item = self._image("select_bg", 32, 1110, anchor="nw", tags=tags)
         self.down_button_item = self._image("down_button", 540, self.down_button_base_y, tags=tags)
+
+    def _selection_choices(self):
+        if self.selection_phase == "song":
+            return tuple(group[0].title for group in self.song_groups), self.song_index
+        return tuple(chart.difficulty for chart in self.song_groups[self.song_index]), self.difficulty_index
 
     def _build_selection_list(self, tags):
         if getattr(self, "extra_stage_active", False):
             self._build_extra_selection_list()
             return
-        if self.selection_phase == "song":
-            choices = tuple(group[0].title for group in self.song_groups)
-            selected = self.song_index
-        else:
-            choices = tuple(chart.difficulty for chart in self.song_groups[self.song_index])
-            selected = self.difficulty_index
-        preview_positions = {
-            -2: (950, 925),
-            -1: (850, 1000),
-            1: (850, 1497),
-            2: (950, 1660),
-        }
-        visible_choices = {selected}
-        for offset in (1, -1, 2, -2):
+        self._build_selection_previews(tags)
+        self._build_selection_card(tags)
+
+    def _build_selection_previews(self, tags, direction=0):
+        """Neighbour cards on the wheel; with a direction they start one slot back for the rotation."""
+        choices, selected = self._selection_choices()
+        entries = {}
+        # Nearest slots first (+1 before -1) so short lists that repeat a choice keep the copy
+        # the resting layout always showed.
+        reach = range(-SELECTION_WHEEL_REACH, SELECTION_WHEEL_REACH + 1)
+        for offset in sorted(reach, key=lambda value: (abs(value), value < 0)):
             choice_index = (selected + offset) % len(choices)
-            if choice_index in visible_choices:
+            start = offset + direction
+            if choice_index in entries or min(abs(start), abs(offset)) > 2:
                 continue
-            visible_choices.add(choice_index)
-            x, y = preview_positions[offset]
-            label = choices[choice_index]
-            self._image("previous", x, y, tags=tags)
-            self._text_image(label.upper(), 27, x, y, color="#ead7fb", tags=tags)
+            # At rest the selection is the centre card; while turning it travels in from its old slot.
+            if choice_index == selected and not (direction and offset == 0):
+                continue
+            entries[choice_index] = (start, offset)
+        self.selection_preview_items = []
+        self.selection_choice_count = len(choices)
+        # Same stacking as the resting layout: outer cards above inner ones.
+        for choice_index, (start, end) in sorted(entries.items(), key=lambda entry: abs(entry[1][1])):
+            x, y = _selection_wheel_point(start)
+            card = self._image("previous", x, y, tags=(*tags, "select_preview"))
+            label = self._text_image(choices[choice_index].upper(), 27, x, y + self._selection_label_shift(start),
+                                     color="#ead7fb", tags=(*tags, "select_preview"))
+            self.selection_preview_items.append((card, label, start, end))
+        if direction:
+            self._place_selection_previews(0.0)
+        # Neighbour cards are rebuilt after the centre card, so lift its overlays back above them.
+        self.canvas.tag_raise("select_overlay")
+
+    def _selection_label_shift(self, offset):
+        """The -2 card covers the top of the -1 card; keep the -1 name in the strip still visible."""
+        if getattr(self, "selection_choice_count", 0) < 5:
+            return 0.0
+        half_height = self.sources["previous"].height / 2
+        visible_top = _SELECTION_WHEEL_POINTS[-2][1] + half_height
+        visible_bottom = _SELECTION_WHEEL_POINTS[-1][1] + half_height
+        shift = (visible_top + visible_bottom) / 2 - _SELECTION_WHEEL_POINTS[-1][1]
+        return shift * max(0.0, 1.0 - abs(offset + 1))
+
+    def _place_selection_previews(self, progress):
+        # Cards squash mid-step as if the wheel turns them past the viewer.
+        squash = 1.0 - 0.32 * math.sin(math.pi * progress)
+        for card, label, start, end in self.selection_preview_items:
+            offset = start + (end - start) * progress
+            x, y = _selection_wheel_point(offset)
+            opacity = _selection_wheel_opacity(offset)
+            self.canvas.coords(card, self._x(x), self._y(y))
+            self.canvas.coords(label, self._x(x), self._y(y + self._selection_label_shift(offset)))
+            for item in (card, label):
+                self.canvas.itemconfigure(item, scale_y=squash, opacity=opacity)
+
+    def _build_selection_card(self, tags):
+        tags = (*tags, "select_card")
         self._prepare_select_media(self.track)
         has_media = self.select_media_photo is not None
         if has_media:
+            # The frame is 170x150; still images fill only its centred 150x150 square.
+            art_left, art_right = (90, 260) if self.select_video is not None else (100, 250)
             self.canvas.create_rectangle(
-                self._x(82), self._y(1152), self._x(268), self._y(1278),
+                self._x(art_left - 8), self._y(1167), self._x(art_right + 8), self._y(1333),
                 fill="#5b416f", outline="", tags=tags,
             )
             self.select_media_item = self.canvas.create_image(
@@ -639,7 +717,7 @@ class MinigameSceneMixin:
         self.scroll_speed_warning_offset = 0.0
         if self.track.has_scroll_speed_changes:
             self.scroll_speed_warning_item = self._image(
-                "scrollspeed_warn", 115, 1440, anchor="nw", tags=tags,
+                "scrollspeed_warn", 115, 1440, anchor="nw", tags=(*tags, "select_overlay"),
             )
 
 

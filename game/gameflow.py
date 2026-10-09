@@ -23,7 +23,7 @@ from game.rules import (
 from game.persistence import save_progress, save_seen_tutorials
 from game.session import GameSession
 from game.settings import arrange_chart
-from game.selection_sync import publish_selection, read_selection, shared_lock
+from game.selection_sync import publish_selection, read_selection, shared_lock, write_json
 
 
 class MinigameFlowMixin:
@@ -139,9 +139,10 @@ class MinigameFlowMixin:
             if (
                 self.select_fade_in_started is not None
                 or self.select_morph_in_started is not None
-                or self.selection_scroll_started is not None
             ):
                 return
+            # Quick presses finish the running wheel turn instead of being dropped.
+            self._finish_selection_wheel()
             if lane == 0:
                 self._cycle_selection()
             elif self.selection_phase == "song":
@@ -317,7 +318,7 @@ class MinigameFlowMixin:
             self.difficulty_index = (self.difficulty_index + 1) % len(difficulties)
             self.track = difficulties[self.difficulty_index]
             self._print(f"[ChartManager] difficulty selected: {self.track.difficulty}")
-        self._refresh_selection_list()
+        self._start_selection_wheel(1)
         if self._track_preview_key(self.track) != previous_preview:
             self._schedule_select_preview(1.0)
         self._broadcast_selection("select")
@@ -348,23 +349,52 @@ class MinigameFlowMixin:
         self.selection_scroll_started = None
         self._build_selection_list(("select", "select_list", "select_dynamic"))
 
-    def _start_selection_scroll(self):
-        self.canvas.addtag_withtag("select_old", "select_list")
-        self.canvas.dtag("select_old", "select_list")
-
-    def _finish_selection_scroll_setup(self):
-        self._build_selection_list(("select", "select_list", "select_dynamic", "select_new"))
+    def _start_selection_wheel(self, direction):
+        """Turn the music select wheel one slot: neighbours rotate along the arc while the
+        centre card flips shut on the old choice and flips open on the new one."""
+        self._finish_selection_wheel()
+        choices, _ = self._selection_choices()
+        if getattr(self, "extra_stage_active", False) or len(choices) < 2:
+            self._refresh_selection_list()
+            return
+        self.canvas.delete("select_preview")
+        self.canvas.addtag_withtag("select_card_old", "select_card")
+        self.canvas.dtag("select_card_old", "select_card")
+        # The new card is built at the half-way point; until then nothing may update the old one.
+        self.select_media_item = None
+        self.scroll_speed_warning_item = None
+        self._build_selection_previews(("select", "select_list", "select_dynamic"), direction)
+        self.selection_card_swapped = False
         self.selection_scroll_started = time.monotonic()
-        self.selection_old_offset = 0.0
-        self.selection_new_offset = 180.0
-        self.selection_old_x = 0.0
-        self.selection_new_x = 250.0
-        self.selection_scroll_swapped = False
-        self.canvas.move(
-            "select_new", self.selection_new_x * self.scale, self.selection_new_offset * self.scale,
-        )
-        self.canvas.itemconfigure("select_new", state="hidden")
-        self._create_selection_sweep()
+        self._flip_selection_card("select_card_old", 1.0)
+
+    def _selection_card_items(self, tag):
+        background = getattr(self, "selection_card_bg_item", None)
+        return (tag,) if background is None else (tag, background)
+
+    def _flip_selection_card(self, tag, openness):
+        pivot = self._y(1110 + self.sources["select_bg"].height / 2)
+        for target in self._selection_card_items(tag):
+            self.canvas.itemconfigure(
+                target, pivot_y=pivot, scale_y=max(0.0, openness),
+                opacity=min(1.0, 0.35 + 0.65 * max(0.0, openness)),
+            )
+
+    def _swap_selection_card(self):
+        self.canvas.delete("select_card_old")
+        self._build_selection_card(("select", "select_list", "select_dynamic"))
+        self.selection_card_swapped = True
+
+    def _finish_selection_wheel(self):
+        if getattr(self, "selection_scroll_started", None) is None:
+            return
+        self.selection_scroll_started = None
+        if not self.selection_card_swapped:
+            self._swap_selection_card()
+        for target in self._selection_card_items("select_card"):
+            self.canvas.itemconfigure(target, pivot_y=None, scale_y=1.0, opacity=1.0)
+        self.canvas.delete("select_preview")
+        self._build_selection_previews(("select", "select_list", "select_dynamic"))
 
     def show_title(self, fade_in=False):
         self.scene = "title"
@@ -561,13 +591,11 @@ class MinigameFlowMixin:
             if state.get("kind") == "mode":
                 self.selection_sync_seen = marker
             return
-        if (self.scene == "result" and state.get("extra")
-                and self.loading_phase is None and self.extra_charts_by_mode.get("4k")):
-            self.extra_challenge_prompt = False
-            self._start_loading("select", self._show_extra_select)
-            return
         if self.scene != "select" or state.get("kind") == "mode":
             return
+        self._finish_selection_wheel()
+        previous = (self.selection_phase, self.song_index, self.difficulty_index,
+                    bool(getattr(self, "extra_stage_active", False)))
         extra = bool(state.get("extra"))
         if extra != bool(getattr(self, "extra_stage_active", False)):
             if extra and self.extra_charts_by_mode.get("4k"):
@@ -601,9 +629,25 @@ class MinigameFlowMixin:
                 self.show_next()
             finally:
                 self.applying_shared_selection = False
+        elif self._is_single_selection_step(previous):
+            self._start_selection_wheel(1)
+            self._schedule_select_preview(1.0)
         else:
             self._build_scene()
             self._schedule_select_preview(1.0)
+
+    def _is_single_selection_step(self, previous):
+        """True when the rival moved the cursor exactly one slot, so this station can turn the wheel too."""
+        phase, song, difficulty, extra = previous
+        if phase != self.selection_phase or extra != bool(getattr(self, "extra_stage_active", False)):
+            return False
+        if getattr(self, "settings_phase", None) is not None:
+            # A rebuild keeps the open settings popup above the list; a turn would draw over it.
+            return False
+        if phase == "song":
+            return self.song_index == (song + 1) % len(self.song_groups) and self.difficulty_index == 0
+        return (self.song_index == song
+                and self.difficulty_index == (difficulty + 1) % len(self.song_groups[song]))
 
     def _clear_join_marker(self):
         if getattr(self, "session_dir", None):
@@ -1137,23 +1181,28 @@ class MinigameFlowMixin:
             if not hasattr(self, "track_ranks"):
                 self.track_ranks = [""] * EVENT_TRACK_COUNT
             self.track_ranks[self.track_index] = self.rank
-        self.extra_challenge_prompt = (
-            self.track_index == self._extra_challenge_stage_count() - 1 and self._extra_challenge_available()
-        )
+        last_stage = self.track_index == self._extra_challenge_stage_count() - 1
+        if self._flow_synced():
+            self._publish_station_result(last_stage and self._extra_challenge_available())
+            # Decided jointly once the rival's result is in (see _animate_extra_challenge_prompt).
+            self.extra_challenge_prompt = last_stage and not getattr(self, "extra_stage_active", False)
+        else:
+            self.extra_challenge_prompt = last_stage and self._extra_challenge_available()
         self.extra_challenge_started = None
         self.extra_challenge_offset = 1120.0
         self.result_rank_voice_played = False
         self.result_rank_sfx_channel = None
         self.result_rank_voice_channel = None
         self.result_transition_target = None
+        # A failed player must not cut the shared result screen short for a rival who cleared.
+        full_duration = is_clear(self.health) or self._flow_synced()
         now = time.monotonic()
         self.result_unlock_at = now + 3.0
-        duration = self.settings["result_seconds"] if is_clear(self.health) else 3.0
+        duration = self.settings["result_seconds"] if full_duration else 3.0
         self.result_deadline = now + duration
         self._build_scene()
         self.scene_started = time.monotonic()
         self.result_unlock_at = self.scene_started + 3.0
-        duration = self.settings["result_seconds"] if is_clear(self.health) else 3.0
         self.result_deadline = self.scene_started + duration
         self._print(
             f"result loaded, score: {self.score}, accuracy: {self.accuracy:.2f}%, "
@@ -1170,22 +1219,32 @@ class MinigameFlowMixin:
             or time.monotonic() < self.result_unlock_at
         ):
             return
+        if getattr(self, "extra_stage_active", False):
+            target, next_track = "game_ended", 0
+        else:
+            cleared = self._joint_result()[0] if self._flow_synced() else is_clear(self.health)
+            target, next_track = event_result_destination(self.track_index, cleared)
+        if self._flow_synced():
+            self._request_flow(target, next_track)
+        else:
+            self._apply_result_destination(target, next_track)
+
+    def _apply_result_destination(self, target, next_track):
         self.extra_challenge_prompt = False
         self._stop_result_rank_audio()
+        self._play_sfx("ok.wav")
+        if target == "extra":
+            self.track_index = 0
+            self._save_event_progress()
+            self.audio.stop(480)
+            self._start_loading("select", self._show_extra_select)
+            return
+        self.result_transition_target = target
         if getattr(self, "extra_stage_active", False):
-            self._play_sfx("ok.wav")
             self._start_loading("game_ended", self.show_game_ended)
             return
-        self.result_transition_target, next_track = event_result_destination(self.track_index, is_clear(self.health))
         self.track_index = next_track
-        try:
-            save_progress(
-                self.progress_path, self.track_index, EVENT_TRACK_COUNT, self.track_scores, self.track_names,
-                getattr(self, "track_ranks", None),
-            )
-        except OSError as error:
-            self._print(f"progress save failed: {error}")
-        self._play_sfx("ok.wav")
+        self._save_event_progress()
         if self.result_transition_target == "select":
             def show_next_select():
                 self._reset_selection()
@@ -1243,19 +1302,97 @@ class MinigameFlowMixin:
             or time.monotonic() < self.result_unlock_at
         ):
             return
-        self.extra_challenge_prompt = False
-        self._stop_result_rank_audio()
-        self.track_index = 0
+        if self._flow_synced():
+            self._request_flow("extra")
+        else:
+            self._apply_result_destination("extra", 0)
+
+    def _save_event_progress(self):
         try:
             save_progress(
-                self.progress_path, self.track_index, EVENT_TRACK_COUNT,
-                self.track_scores, self.track_names, self.track_ranks,
+                self.progress_path, self.track_index, EVENT_TRACK_COUNT, self.track_scores, self.track_names,
+                getattr(self, "track_ranks", None),
             )
         except OSError as error:
             self._print(f"progress save failed: {error}")
-        self._play_sfx("ok.wav")
-        self.audio.stop(480)
-        self._start_loading("select", self._show_extra_select)
+
+    # Two-player flow: the first station to leave a post-game scene records where both go next.
+    FLOW_SCENES = ("result", "total_result", "game_ended")
+
+    def _flow_synced(self):
+        return bool(getattr(self, "two_player", False) and getattr(self, "session_dir", None))
+
+    def _flow_path(self):
+        return os.path.join(self.session_dir, "flow.json")
+
+    def _flow_stage(self, scene=None):
+        extra = int(bool(getattr(self, "extra_stage_active", False)))
+        return f"{getattr(self, 'entry_round', 0)}:{self.track_index}:{extra}:{scene or self.scene}"
+
+    def _station_result_path(self, station):
+        return os.path.join(self.session_dir, f"result_{station}.json")
+
+    def _publish_station_result(self, extra_available):
+        state = {"stage": self._flow_stage("result"), "cleared": bool(is_clear(self.health)),
+                 "extra": bool(extra_available)}
+        try:
+            write_json(self._station_result_path(self.station), state)
+        except OSError as error:
+            self._print(f"[FlowSync] result publish failed: {error}")
+
+    def _joint_result(self):
+        """(cleared, extra available) for the pair: playing on as long as anyone in play cleared."""
+        stage = self._flow_stage("result")
+        stations = ((self._entry_controller_station(),) if getattr(self, "solo_active", False) else (1, 2))
+        results = [
+            result for station in stations
+            if (result := read_selection(self._station_result_path(station))) is not None
+            and result.get("stage") == stage
+        ]
+        if not results:
+            return is_clear(self.health), self._extra_challenge_available()
+        return any(result.get("cleared") for result in results), any(result.get("extra") for result in results)
+
+    def _request_flow(self, target, track_index=0):
+        path = self._flow_path()
+        stage = self._flow_stage()
+        try:
+            with shared_lock(path):
+                decision = read_selection(path)
+                if not isinstance(decision, dict) or decision.get("stage") != stage:
+                    decision = {"stage": stage, "target": target, "track_index": track_index}
+                    write_json(path, decision)
+        except OSError as error:
+            # Keep this station moving; the rival can still follow its own timer.
+            self._print(f"[FlowSync] flow publish failed: {error}")
+            decision = {"stage": stage, "target": target, "track_index": track_index}
+        self._apply_flow(decision)
+
+    def _poll_flow(self):
+        if (not self._flow_synced() or self.scene not in self.FLOW_SCENES
+                or self.loading_phase is not None):
+            return
+        decision = read_selection(self._flow_path())
+        if isinstance(decision, dict) and decision.get("stage") == self._flow_stage():
+            self._apply_flow(decision)
+
+    def _apply_flow(self, decision):
+        stage = decision.get("stage")
+        if (stage != self._flow_stage() or stage == getattr(self, "flow_applied_stage", None)
+                or self.loading_phase is not None):
+            return
+        self.flow_applied_stage = stage
+        target = decision.get("target")
+        self._print(f"[FlowSync] {self.scene} -> {target}")
+        if self.scene == "result":
+            track_index = decision.get("track_index", 0)
+            if not isinstance(track_index, int) or not 0 <= track_index < EVENT_TRACK_COUNT:
+                track_index = 0
+            self._apply_result_destination(target, track_index)
+        elif self.scene == "total_result":
+            self._leave_total_result()
+        elif self.scene == "game_ended":
+            self._begin_game_ended_exit()
 
     def _show_extra_select(self):
         mode = self.game_mode
@@ -1272,6 +1409,12 @@ class MinigameFlowMixin:
     def start_total_result_transition(self):
         if self.scene != "total_result" or self.loading_phase is not None:
             return
+        if self._flow_synced():
+            self._request_flow("game_ended")
+        else:
+            self._leave_total_result()
+
+    def _leave_total_result(self):
         if self.total_result_count_channel is not None:
             self.total_result_count_channel.stop()
             self.total_result_count_channel = None
@@ -1295,6 +1438,14 @@ class MinigameFlowMixin:
         if (self.scene != "game_ended" or self.loading_phase is not None
                 or self.game_ended_exit_started is not None
                 or time.monotonic() < self.scene_started + 0.8):
+            return
+        if self._flow_synced():
+            self._request_flow("ending")
+        else:
+            self._begin_game_ended_exit()
+
+    def _begin_game_ended_exit(self):
+        if self.game_ended_exit_started is not None:
             return
         self._play_sfx("ok.wav")
         self.game_ended_exit_started = time.monotonic()
