@@ -1,16 +1,21 @@
 import os
+import threading
+import time
 from collections import deque
 from datetime import datetime
 
 
 class AudioPlayer:
     HITSOUND_CHANNEL_COUNT = 32
+    LAYER_CHANNEL_COUNT = 4
     SFX_CHANNEL_COUNT = 16
 
     def __init__(self):
         self.available = False
         self.current_path = None
         self.sfx_cache = {}
+        self.layer_sounds = ()
+        self.layer_generation = 0
         try:
             os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
             import pygame
@@ -19,11 +24,16 @@ class AudioPlayer:
             pygame.mixer.init()
             pygame.mixer.set_num_channels(max(
                 pygame.mixer.get_num_channels(),
-                self.HITSOUND_CHANNEL_COUNT + self.SFX_CHANNEL_COUNT,
+                self.HITSOUND_CHANNEL_COUNT + self.LAYER_CHANNEL_COUNT + self.SFX_CHANNEL_COUNT,
             ))
-            pygame.mixer.set_reserved(self.HITSOUND_CHANNEL_COUNT)
+            pygame.mixer.set_reserved(self.HITSOUND_CHANNEL_COUNT + self.LAYER_CHANNEL_COUNT)
             self.hitsound_channels = deque(
                 pygame.mixer.Channel(index) for index in range(self.HITSOUND_CHANNEL_COUNT)
+            )
+            # Layered BGM stems loop on their own channels so they stay sample-aligned.
+            self.layer_channels = tuple(
+                pygame.mixer.Channel(self.HITSOUND_CHANNEL_COUNT + index)
+                for index in range(self.LAYER_CHANNEL_COUNT)
             )
             self.pygame = pygame
             self.available = True
@@ -63,7 +73,76 @@ class AudioPlayer:
                 self.pygame.mixer.music.stop()
         except Exception:
             pass
+        self._stop_layers(fade_ms)
         self.current_path = None
+
+    def play_layers(self, paths, level=0, fade_ms=0, fallback_path=None):
+        """Loop stems in sync; stems above `level` stay muted until set_layer_level."""
+        self.stop()
+        if not self.available:
+            return
+        sounds = [self._sound(path) for path in paths]
+        if None in sounds or len(sounds) > len(self.layer_channels):
+            if fallback_path is not None:
+                self.play(fallback_path, loop=True, fade_ms=fade_ms)
+            return
+        try:
+            for index, (channel, sound) in enumerate(zip(self.layer_channels, sounds)):
+                channel.set_volume(1.0 if index <= level else 0.0)
+            for channel, sound in zip(self.layer_channels, sounds):
+                channel.play(sound, loops=-1, fade_ms=max(0, fade_ms))
+            self.layer_sounds = tuple(sounds)
+            self._print(f"[AudioManager] playing layers: {os.path.basename(paths[0])} (L{level})")
+        except Exception as error:
+            self._print(f"[AudioManager] layer playback failed: {error}")
+
+    def set_layer_level(self, level, fade_ms=500):
+        if not self.available or not self.layer_sounds:
+            return
+        self.layer_generation += 1
+        generation = self.layer_generation
+        channels = self.layer_channels[:len(self.layer_sounds)]
+        starts = [channel.get_volume() for channel in channels]
+        targets = [1.0 if index <= level else 0.0 for index in range(len(channels))]
+        self._print(f"[AudioManager] layer level: L{level}")
+
+        def ramp():
+            began = time.monotonic()
+            while generation == self.layer_generation:
+                progress = 1.0 if fade_ms <= 0 else min(1.0, (time.monotonic() - began) * 1000 / fade_ms)
+                for channel, start, target in zip(channels, starts, targets):
+                    channel.set_volume(start + (target - start) * progress)
+                if progress >= 1.0:
+                    return
+                time.sleep(0.015)
+
+        threading.Thread(target=ramp, daemon=True).start()
+
+    def _stop_layers(self, fade_ms=0):
+        if not self.layer_sounds:
+            return
+        self.layer_generation += 1
+        for channel in self.layer_channels:
+            try:
+                if fade_ms > 0:
+                    channel.fadeout(fade_ms)
+                else:
+                    channel.stop()
+            except Exception:
+                pass
+        self.layer_sounds = ()
+
+    def _sound(self, path):
+        if path not in self.sfx_cache:
+            if not os.path.isfile(path):
+                self._print(f"sfx file missing: {path}")
+                return None
+            try:
+                self.sfx_cache[path] = self.pygame.mixer.Sound(path)
+            except Exception as error:
+                self._print(f"[AudioManager] sound load failed: {error}")
+                return None
+        return self.sfx_cache[path]
 
     def play_sfx(self, path, volume=1.0):
         if not self.available:

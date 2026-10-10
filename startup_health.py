@@ -191,6 +191,7 @@ def check_runtime_files(base, required_paths=None, image_paths=None):
             "files/main_conf.ini",
             "files/model_conf.ini",
             "files/fonts/KERISKEDU_B.ttf",
+            "files/fonts/Cafe24Ssurround-v2.0.otf",
             "files/fonts/Novecentosanswide-DemiBold.otf",
             "files/img/unrecoverable_system_error.svg",
             "game/imgs/generic/fail_io.png",
@@ -204,7 +205,7 @@ def check_runtime_files(base, required_paths=None, image_paths=None):
             os.path.join("files", "img", filename)
             for filename in (
                 "can.png", "cans.png", "ground_layer.png", "plastic_bottle.png",
-                "trash_can.png", "update_layer.png", "crush_please_wait.png", "trash_full.png",
+                "trash_can.png", "update_layer.png",
             )
         )
     _validate_configs(base)

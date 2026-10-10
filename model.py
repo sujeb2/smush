@@ -11,6 +11,7 @@ from ultralytics import YOLO
 from ultralytics.nn import modules as utl_modules
 from ultralytics.nn.tasks import DetectionModel
 import configparser as cfg
+from camera_select import open_camera
 
 def findCompiledDir():
     if "__compiled__" in globals() or getattr(sys, "frozen", False):
@@ -46,12 +47,56 @@ weights=[
     torch.nn.modules.ModuleList
 ]
 
+class LatestFrameReader:
+    """Reads the camera on its own thread so inference always gets the newest frame
+    instead of one that queued up in the driver buffer while the previous frame ran."""
+
+    def __init__(self, capture, timeout=5.0):
+        self.capture = capture
+        self.timeout = timeout
+        self.condition = threading.Condition()
+        self.ret, self.frame, self.fresh = True, None, False
+        self.running = True
+        self.thread = threading.Thread(target=self._run, daemon=True, name="smush-camera-reader")
+        self.thread.start()
+
+    def _run(self):
+        try:
+            while self.running:
+                ret, frame = self.capture.read()
+                with self.condition:
+                    self.ret, self.frame, self.fresh = ret, frame, True
+                    self.condition.notify_all()
+                if not ret or frame is None:
+                    break
+        finally:
+            # The reader thread owns the capture so it is never released mid-read.
+            self.capture.release()
+
+    def read(self):
+        with self.condition:
+            if not self.condition.wait_for(lambda: self.fresh, self.timeout):
+                return False, None
+            self.fresh = False
+            return self.ret, self.frame
+
+    def isOpened(self):
+        return self.capture.isOpened()
+
+    def set(self, prop, value):
+        return self.capture.set(prop, value)
+
+    def release(self):
+        self.running = False
+        if self.thread is not threading.current_thread():
+            self.thread.join(timeout=self.timeout)
+
 class Model:
     def __init__(self, model_path, serial):
         try:
             self.timestamp = datetime.now().strftime('%H:%M:%S')
             print(f'[{self.timestamp}] [ModelRecog] Init model..')
-            self.vc = cv2.VideoCapture(0)
+            self.vc = open_camera(config['GENERIC'].getint('CameraIndex', fallback=-1))
             self.model_path = model_path
             self.serial_ignore = True
             torch.serialization.add_safe_globals(weights)
@@ -97,18 +142,20 @@ class Model:
         self.camera = self.vc
         try:
             if not self.camera.isOpened():
-                self.camera = cv2.VideoCapture(0)
+                self.camera = open_camera(config['GENERIC'].getint('CameraIndex', fallback=-1))
             target_fps = config['GENERIC'].getint('CameraFPS', fallback=480)
             if target_fps > 0:
                 self.camera.set(cv2.CAP_PROP_FPS, target_fps)
             wait_time_ms = max(1, int(1000 / target_fps)) if target_fps > 0 else 1
+            self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            if config['GENERIC'].getboolean('CameraReaderThread', fallback=True):
+                self.camera = LatestFrameReader(self.camera)
             try:
-                device = "cuda:0" if torch.cuda.is_available() else "cpu"
-                if torch.mps.is_available(): device="mps:0"
+                self.device = self._select_device()
                 self.model = YOLO(
                     self.model_path,
                     verbose=config['GENERIC'].getboolean('Verbose'),
-                ).to(device=device)
+                ).to(device=self.device)
                 print(f"[{self.timestamp}] [ModelRecog] task: {self.model.task}, classes: {self.model.names}")
             except Exception:
                 if os.path.basename(self.model_path) not in imageai_supported:
@@ -117,6 +164,7 @@ class Model:
                 traceback.print_exc()
                 return self.fallbackLiveFeed(show_preview)
 
+            last_report = None
             while not self.captured:
                 busy, generation = self._recognition_state()
                 ret, frame = self.camera.read()
@@ -145,9 +193,15 @@ class Model:
                         recognized = self.foundObjs(result)
                         self.names = [name for name, confidence in recognized]
                         self.confident = [confidence for name, confidence in recognized]
+                        # Log only when the recognized set changes; per-frame console output slows the loop.
+                        report = tuple(self.names)
                         if result.probs is not None:
-                            print(f'[{self.timestamp}] [ModelRecog] top class: {result.names[result.probs.top1]}, confidence: {float(result.probs.top1conf):.4f}')
-                        print(f'[{self.timestamp}] [ModelRecog] confident: {self.confident}, names: {self.names}')
+                            report += (result.names[result.probs.top1],)
+                        if report != last_report:
+                            last_report = report
+                            if result.probs is not None:
+                                print(f'[{self.timestamp}] [ModelRecog] top class: {result.names[result.probs.top1]}, confidence: {float(result.probs.top1conf):.4f}')
+                            print(f'[{self.timestamp}] [ModelRecog] confident: {self.confident}, names: {self.names}')
                         for index in (1, 2):
                             expected = config['DETECTION'].get(f'ExpectedObject_{index}')
                             if expected and expected in self.names:
@@ -176,11 +230,21 @@ class Model:
             if show_preview:
                 self.closePreview()
 
+    def _select_device(self):
+        if torch.cuda.is_available():
+            return "cuda:0"
+        if torch.backends.mps.is_available():
+            return "mps:0"
+        return "cpu"
+
     def predict(self, source):
         options = {}
         if self.model.task != 'classify':
             options['conf'] = config['DETECTION'].getfloat('Confidence', fallback=0.5)
-        return self.model.predict(source=source, stream=True, **options)
+        # Ultralytics re-selects the device per predictor and never picks MPS on its own,
+        # so pass it explicitly. verbose=False stops a log line on every frame.
+        return self.model.predict(source=source, stream=True, verbose=False,
+                                  device=getattr(self, 'device', None) or self._select_device(), **options)
 
     def _recognition_state(self):
         if self.serial_ignore:

@@ -1,4 +1,5 @@
 import configparser
+import threading
 import unittest
 from unittest.mock import Mock, patch
 
@@ -13,7 +14,8 @@ class ClassificationIntegrationTests(unittest.TestCase):
     def setUp(self):
         settings = configparser.ConfigParser()
         settings.read_dict({
-            'GENERIC': {'ShowCaptureVid': 'False', 'CameraFPS': '0', 'Verbose': 'False'},
+            'GENERIC': {'ShowCaptureVid': 'False', 'CameraFPS': '0', 'Verbose': 'False',
+                        'CameraReaderThread': 'False'},
             'DETECTION': {
                 'HasExpectedObject': 'True', 'ClassificationConfidence': '0.8',
                 'ExpectedObject_1': 'can', 'ExpectedObject_2': 'plastic',
@@ -50,6 +52,8 @@ class ClassificationIntegrationTests(unittest.TestCase):
             worker.liveFeedCapture()
             self.assertNotIn('task', loader.call_args.kwargs)
             self.assertNotIn('conf', classifier.predict.call_args.kwargs)
+            self.assertFalse(classifier.predict.call_args.kwargs['verbose'])
+            self.assertEqual(classifier.predict.call_args.kwargs['device'], worker.device)
         worker.vc.release.assert_called_once()
         return worker
 
@@ -162,6 +166,41 @@ class ClassificationIntegrationTests(unittest.TestCase):
             self.assertEqual(writer.return_value.write.call_count, 3)
             writer.return_value.release.assert_called_once()
         self.assertEqual(worker.camera.read.call_count, 3)
+
+
+class LatestFrameReaderTests(unittest.TestCase):
+    def test_read_returns_newest_frame_and_skips_stale_ones(self):
+        frames = iter(range(1, 6))
+        queued = threading.Event()
+        hold = threading.Event()
+        capture = Mock()
+
+        def read():
+            value = next(frames, None)
+            if value is None:
+                queued.set()
+                hold.wait()  # camera has no new frame yet
+                return False, None
+            return True, value
+
+        capture.read.side_effect = read
+        reader = model.LatestFrameReader(capture, timeout=1.0)
+        self.assertTrue(queued.wait(1.0))
+        self.assertEqual(reader.read(), (True, 5))  # frames 1-4 were dropped
+        reader.timeout = 0.05
+        self.assertEqual(reader.read(), (False, None))  # same frame is never handed out twice
+        hold.set()
+        reader.release()
+        capture.release.assert_called_once()
+
+    def test_read_times_out_when_camera_stalls(self):
+        capture = Mock()
+        stall = threading.Event()
+        capture.read.side_effect = lambda: (stall.wait(), (True, None))[1]
+        reader = model.LatestFrameReader(capture, timeout=0.05)
+        self.assertEqual(reader.read(), (False, None))
+        stall.set()
+        reader.release()
 
 
 if __name__ == '__main__':

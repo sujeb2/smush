@@ -113,6 +113,8 @@ void boot() {
   setup();
   Serial.messages.clear();
 }
+using Messages = std::vector<std::string>;
+Messages take() { Messages taken; taken.swap(Serial.messages); return taken; }
 int main() {
   // Exercise the real stepper controller, not a motor-library stub.
   ConveyorStepper testMotor(8, 9, 10, 11, 12, 13, 10000UL);
@@ -188,64 +190,78 @@ int main() {
   boot(); assertBackward();
   assert(modes[2] == 0 && modes[3] == OUTPUT && modes[4] == OUTPUT && modes[5] == OUTPUT);
   step(MOTOR_RESET_TIME - 1, "obj1_detect\n"); assertBackward();
-  assert(Serial.messages.empty());
+  assert(Serial.messages.empty()); // Boot reset reports nothing until it finishes.
   step(MOTOR_RESET_TIME); assertStopped();
   assert(motor_phase == IDLE);
+  assert(take() == (Messages{"crushing_done", "phase:idle:0"}));
   step(MOTOR_RESET_TIME + MOTOR_BRAKE_FOR - 1, "obj1_detect\n");
   assertStopped(); assert(Serial.messages.empty());
   const unsigned long start = MOTOR_RESET_TIME + MOTOR_BRAKE_FOR;
   step(start, "obj1_detect\n"); assertStopped();
   assert(motor_phase == CONVEYING && conveyorRunning);
   assert(conveyor.isMoving());
-  assert(Serial.messages == std::vector<std::string>{"obj_dropped1"});
+  assert(take() == (Messages{"obj_dropped1", "phase:convey:6500"}));
   step(start + 50, "obj2_detect\n"); // Busy input cannot extend movement.
-  assertStopped(); assert(Serial.messages.size() == 1);
+  assertStopped(); assert(Serial.messages.empty());
+  step(start + 1000); assert(take() == (Messages{"phase:convey:5500"})); // Heartbeat.
+  step(start + 1500); assert(Serial.messages.empty()); // At most once a second.
   const unsigned long crushing = start + CONV_FORWARD_FOR;
   step(crushing - 1, "obj2_"); assertStopped();
   assert(conveyorRunning && motor_phase == CONVEYING);
+  take();
   step(crushing); assertForward();
   assert(!conveyorRunning && !conveyor.isMoving()); assertCoilsOff();
   assert(motor_phase == BUSY && crusherStartedAt == crushing);
+  assert(take() == (Messages{"phase:crush:13000", "crushing_busy"}));
   step(crushing + 1, "detect\n"); assertForward();
-  assert(Serial.messages.size() == 1);
+  assert(Serial.messages.empty()); // No longer floods crushing_busy every loop.
+  step(crushing + 1000); assert(take() == (Messages{"phase:crush:12000", "crushing_busy"}));
   const unsigned long pause = crushing + MOTOR_RUNNING_FOR;
   step(pause - 1, "obj2_"); assertForward();
+  take();
   step(pause); assertStopped();
   assert(motor_phase == PAUSED);
+  assert(take() == (Messages{"phase:reset:13150"}));
   assert(!conveyorRunning);
   step(pause + MOTOR_BRAKE_FOR - 1, "detect\n"); assertStopped();
-  assert(Serial.messages.size() == 1);
+  assert(Serial.messages.empty());
   const unsigned long returning = pause + MOTOR_BRAKE_FOR;
   step(returning, "obj2_detect\n"); assertBackward();
-  assert(motor_phase == RESETING && Serial.messages.size() == 1);
+  assert(motor_phase == RESETING && Serial.messages.empty()); // Brake and return are one phase.
   step(returning + MOTOR_RUNNING_FOR - 1); assertBackward();
+  assert(take() == (Messages{"phase:reset:1"}));
   step(returning + MOTOR_RUNNING_FOR); assertStopped();
   assert(motor_phase == IDLE);
-  const unsigned long second = returning + MOTOR_RUNNING_FOR + MOTOR_BRAKE_FOR;
+  assert(take() == (Messages{"crushing_done", "phase:idle:0"}));
+  step(clockMs + 5000); assert(Serial.messages.empty()); // Idle sends no heartbeat.
+  const unsigned long second = clockMs + MOTOR_BRAKE_FOR;
   step(second, "obj2_detect\r\n"); assertStopped();
   assert(conveyorRunning && motor_phase == CONVEYING);
-  assert(Serial.messages.size() == 2 && Serial.messages.back() == "obj_dropped2");
+  assert(take() == (Messages{"obj_dropped2", "phase:convey:6500"}));
   const unsigned long secondCrushing = second + CONV_FORWARD_FOR;
   step(secondCrushing); assertForward(); assert(!conveyorRunning);
   step(secondCrushing + MOTOR_RUNNING_FOR); assertStopped();
   step(secondCrushing + MOTOR_RUNNING_FOR + MOTOR_BRAKE_FOR); assertBackward();
   step(secondCrushing + 2 * MOTOR_RUNNING_FOR + MOTOR_BRAKE_FOR); assertStopped();
   step(clockMs + MOTOR_BRAKE_FOR); // Wait before accepting another detection.
+  take();
   step(clockMs + 1, std::string(80, 'x') + "obj1_detect\n");
-  assertStopped(); assert(Serial.messages.size() == 2);
+  assertStopped(); assert(Serial.messages.empty());
   step(clockMs + 1, "invalid\nreset\nreset_soft_extra\n"); assertStopped();
   assert(!interruptsDisabled);
   step(clockMs + 1, "obj1_detect"); assertStopped();
   step(clockMs + 1, "\n"); assertStopped(); // Recovers after invalid input.
   assert(conveyorRunning && motor_phase == CONVEYING);
-  assert(Serial.messages.size() == 3);
+  assert(take() == (Messages{"obj_dropped1", "phase:convey:6500"}));
 
   // Reset bypasses the busy guard in every phase, and stops every actuator
   // before the watchdog fires. A queued detection must never start a motor.
   const CrusherPhase phases[] = {INITIALIZING, IDLE, CONVEYING, BUSY, PAUSED, RESETING};
   for(CrusherPhase phase : phases) {
     boot();
-    if(phase != INITIALIZING) step(MOTOR_RESET_TIME + MOTOR_BRAKE_FOR);
+    if(phase != INITIALIZING) { // Finish the boot reset, then wait out the brake.
+      step(MOTOR_RESET_TIME); step(MOTOR_RESET_TIME + MOTOR_BRAKE_FOR);
+    }
     if(phase == CONVEYING || phase == BUSY || phase == PAUSED || phase == RESETING)
       step(clockMs, "obj1_detect\n");
     if(phase == BUSY || phase == PAUSED || phase == RESETING)

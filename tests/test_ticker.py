@@ -4,9 +4,11 @@ import subprocess
 import tempfile
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from game.ticker import song_label, ticker_message, ticker_text
+import re
+
+from game.ticker import FONT, TickerRuntimeMixin, render_preview, song_label, ticker_frame, ticker_message, ticker_text
 from serial_arduino import SerialIO
 
 
@@ -50,6 +52,58 @@ class TickerTextTests(unittest.TestCase):
             port.write.assert_called_once_with(b"TICK:B:LOAD\n")
             with self.assertRaises(ValueError):
                 serial_io.set_ticker("夜")
+
+
+class TickerPreviewTests(unittest.TestCase):
+    def test_font_matches_firmware(self):
+        sketch = pathlib.Path(__file__).resolve().parents[1] / "hardware/arduino/boardio/boardio.ino"
+        table = re.search(r"TICKER_FONT\[64\] PROGMEM = \{(.*?)\};", sketch.read_text(), re.S).group(1)
+        self.assertEqual(tuple(int(value, 16) for value in re.findall(r"0x[0-9A-F]{2}", table)), FONT)
+
+    def test_frames_follow_firmware_timing(self):
+        self.assertEqual(ticker_frame("HI", False, 0), (0, 0x76, 0x30, 0))
+        self.assertEqual(ticker_frame("ABCDE", False, 0), (0, 0, 0, 0))
+        self.assertEqual(ticker_frame("ABCDE", False, 0.28), (0, 0, 0, 0x77))
+        self.assertEqual(ticker_frame("abcde", False, 0.28 * 5), (0x7C, 0x39, 0x5E, 0x79))
+        self.assertEqual(ticker_frame("ERR", True, 0.2), (0x79, 0x50, 0x50, 0))
+        self.assertEqual(ticker_frame("ERR", True, 0.7), (0, 0, 0, 0))
+
+    def test_preview_lights_only_requested_segments(self):
+        image = render_preview((0x01, 0x40, 0, 0x7F))
+        lit = (255, 48, 32, 255)
+        self.assertEqual(image.getpixel((48 + 36, 14)), lit)  # digit 1, segment A
+        self.assertNotEqual(image.getpixel((48 + 36, 74)), lit)  # digit 1, segment G
+        self.assertEqual(image.getpixel((156 + 36, 74)), lit)  # digit 2, segment G
+        self.assertNotEqual(image.getpixel((264 + 36, 74)), lit)  # digit 3 is blank
+
+    def test_demo_preview_follows_led_toggle_and_keeps_scroll_on_resend(self):
+        class Runtime(TickerRuntimeMixin):
+            pass
+
+        runtime = Runtime()
+        runtime.root, runtime.canvas = Mock(), Mock()
+        runtime.canvas.coords.return_value = [540, 570]
+        runtime._x = runtime._y = lambda value: value
+        runtime.running, runtime.unrecoverable_error = True, None
+        runtime.demo_mode, runtime.serial, runtime.led_preview_visible = True, None, False
+        runtime.scene, runtime.track = "title", track()
+        with patch("game.ticker.time.monotonic", return_value=100.0):
+            runtime._initialize_ticker()
+            runtime._tick_ticker()
+        runtime.canvas.create_image.assert_not_called()
+        runtime.led_preview_visible = True
+        with patch("game.ticker.time.monotonic", return_value=100.28):
+            runtime._tick_ticker()
+        self.assertEqual(runtime.ticker_preview_frame, (0, 0, 0, FONT[ord("W") - 0x20]))
+        runtime.canvas.create_image.assert_called_once()
+        self.assertEqual(runtime.canvas.create_image.call_args.kwargs["tags"], ("ticker_preview",))
+        with patch("game.ticker.time.monotonic", return_value=100.29):
+            runtime._tick_ticker()  # Same frame: no redraw.
+        runtime.canvas.create_image.assert_called_once()
+        runtime.led_preview_visible = False
+        runtime._tick_ticker()
+        runtime.canvas.delete.assert_called_with("ticker_preview")
+        self.assertIsNone(runtime.ticker_preview_frame)
 
 
 class BoardIOTickerFirmwareTests(unittest.TestCase):

@@ -5,6 +5,10 @@ from PIL import Image, ImageDraw, ImageFont
 from game.rules import is_clear
 from ui_framework import DESIGN_HEIGHT, DESIGN_WIDTH
 
+EXTRA_CHALLENGE_BAND_HEIGHT = 450
+# The prompt rises this far (design px) while it fades in over the dimmed result.
+EXTRA_CHALLENGE_SLIDE = 160.0
+
 
 class MinigameResultSceneMixin:
     def _build_result(self):
@@ -126,21 +130,58 @@ class MinigameResultSceneMixin:
         )
         self._image("result_down_button", 540, 1845, tags=("game_ended",))
 
+    def _extra_challenge_band_source(self):
+        """Dark information band in the HOW TO PLAY style, with the BT1/BT2 chips of music select."""
+        if "extra_challenge_band" in self.sources:
+            return self.sources["extra_challenge_band"]
+        width, height = DESIGN_WIDTH, EXTRA_CHALLENGE_BAND_HEIGHT
+        band = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(band)
+        for y in range(height):
+            # Solid through the middle, feathered at both edges so it floats over the dimmed result.
+            edge = min(1.0, y / 48, (height - 1 - y) / 48)
+            shade = round(30 * y / height)
+            draw.line((0, y, width, y), fill=(shade, shade, shade, round(235 * edge)))
+        title_font = ImageFont.truetype(self.novecento_demibold_font_path, 39)
+        text_font = ImageFont.truetype(self.display_font_path, 32)
+        label_font = ImageFont.truetype(self.display_font_path, 26)
+        chip_font = ImageFont.truetype(self.novecento_demibold_font_path, 38)
+        draw.text((68, 82), "SPECIAL CHALLENGE", font=title_font, fill="white", anchor="lm")
+        draw.text((540, 168), "스페셜 챌린지를 도전할 수 있습니다.", font=text_font, fill="white", anchor="mm")
+        draw.text((540, 213), "EXTRA STAGE에 도전하시겠습니까?", font=text_font, fill="white", anchor="mm")
+        # Same colours as the music select BT1/BT2 buttons (music_select/down_bt.png).
+        chips = (
+            (380, "BT1", "시도하기", (166, 229, 255), (214, 239, 250), (38, 50, 56)),
+            (700, "BT2", "취소", (1, 255, 128), (107, 255, 181), (13, 60, 37)),
+        )
+        chip_width, chip_top, chip_bottom = 206, 318, 402
+        for center, button, label, top_color, bottom_color, ink in chips:
+            draw.text((center, 286), label, font=label_font, fill="white", anchor="mm")
+            gradient = Image.new("RGBA", (chip_width, chip_bottom - chip_top))
+            for y in range(gradient.height):
+                mix = y / max(1, gradient.height - 1)
+                color = tuple(round(a + (b - a) * mix) for a, b in zip(top_color, bottom_color))
+                ImageDraw.Draw(gradient).line((0, y, chip_width, y), fill=(*color, 255))
+            mask = Image.new("L", gradient.size, 0)
+            ImageDraw.Draw(mask).rounded_rectangle((0, 0, *gradient.size), radius=28, fill=255)
+            left = center - chip_width // 2
+            band.paste(gradient, (left, chip_top), mask)
+            draw.text((center, (chip_top + chip_bottom) / 2), button, font=chip_font, fill=ink, anchor="mm")
+        self.sources["extra_challenge_band"] = band
+        return band
+
     def _build_extra_challenge_prompt(self):
-        tags = ("extra_challenge",)
-        offset = self.extra_challenge_offset
-        center_x, center_y = DESIGN_WIDTH / 2, DESIGN_HEIGHT / 2
-        self._image("information", center_x, center_y + offset, tags=tags)
-        for text, size, x, y in (
-            ("스페셜 챌린지를 도전할 수 있습니다.", 30, center_x, center_y - 70),
-            ("BTN1   시도하기", 28, center_x - 185, center_y + 65),
-            ("BTN2   취소", 28, center_x + 205, center_y + 65),
-        ):
-            photo = self._text_photo(text, size, color="#39264d", font_path=self.display_font_path)
-            self.scene_photos.append(photo)
-            self.canvas.create_image(
-                self._x(x), self._y(y + offset), image=photo, anchor="center", tags=tags,
-            )
+        self.extra_challenge_dim_item = self.canvas.create_rectangle(
+            self._x(0), self._y(0), self._x(DESIGN_WIDTH), self._y(DESIGN_HEIGHT),
+            fill="#000000", outline="", tags=("extra_challenge_dim",),
+        )
+        self.canvas.itemconfigure(self.extra_challenge_dim_item, opacity=0.0)
+        self.extra_challenge_band_item = self.canvas.create_image(
+            self._x(DESIGN_WIDTH / 2), self._y(DESIGN_HEIGHT / 2 + self.extra_challenge_offset),
+            image=self._scaled_photo(self._extra_challenge_band_source()), anchor="center",
+            tags=("extra_challenge",),
+        )
+        self.canvas.itemconfigure(self.extra_challenge_band_item, opacity=0.0)
 
     def _animate_extra_challenge_prompt(self, now):
         if not getattr(self, "extra_challenge_prompt", False) or now < self.result_unlock_at:
@@ -154,9 +195,13 @@ class MinigameResultSceneMixin:
             self.extra_challenge_started = now
             self._play_sfx("information.wav")
         progress = min(1.0, (now - self.extra_challenge_started) / 0.5)
-        offset = 1120.0 * (1.0 - progress) ** 3
+        eased = 1.0 - (1.0 - progress) ** 3
+        offset = EXTRA_CHALLENGE_SLIDE * (1.0 - progress) ** 3
         self.canvas.move("extra_challenge", 0, (offset - self.extra_challenge_offset) * self.scale)
         self.extra_challenge_offset = offset
+        self.canvas.itemconfigure("extra_challenge_dim", opacity=0.55 * eased)
+        self.canvas.itemconfigure("extra_challenge", opacity=eased)
+        self.canvas.tag_raise("extra_challenge_dim")
         self.canvas.tag_raise("extra_challenge")
 
     def _build_ending(self):

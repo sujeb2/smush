@@ -3,7 +3,7 @@ import configparser
 import math
 import os
 import queue
-import random
+import re
 import threading
 import time
 from collections import deque
@@ -11,8 +11,14 @@ from datetime import datetime
 
 from PIL import Image, ImageTk
 
+from particles import Fireworks
+from status_card import DEFAULT_DURATIONS, PHASES, MachineCycle, StatusCard
 from dependency_updater import DependencyUpdateError, load_requirements, requirement_name, update_dependencies
 from ui_framework import CanvasUIFramework, DESIGN_HEIGHT, DESIGN_WIDTH, find_compiled_dir
+
+
+PHASE_MESSAGE = re.compile(r"phase:([a-z]+):(\d+)")
+PHASE_PARTIAL = re.compile(r"phase:[a-z]*(:\d*)?")
 
 
 def should_celebrate(previous_count, current_count):
@@ -56,22 +62,13 @@ class RecyclingUI(CanvasUIFramework):
         self.drop_duration = 0.9
         self.drop_frame = 0
         self.drop_sequence = 0
-        self.firework_particles = []
+        self.fireworks = None
+        self.firework_frame_at = 0.0
         self.crushing_busy = False
         self.trash_full = False
-        self.status_card_kind = None
-        self.status_card_progress = 0.0
-        self.status_card_target = 0.0
-        self.status_card_job = None
-        self.status_card_id = None
-        self.status_card_duration = 0.45
-        self.status_sources = {
-            command: Image.open(os.path.join(self.base, "files", "img", filename)).convert("RGBA")
-            for command, filename in (
-                ("crushing_busy", "crush_please_wait.png"),
-                ("trash_full", "trash_full.png"),
-            )
-        }
+        self.card_font_path = os.path.join(self.base, "files", "fonts", "Cafe24Ssurround-v2.0.otf")
+        self.cycle = MachineCycle()
+        self.status_card = StatusCard(self, self.cycle, self.card_font_path)
         self.ground_source = Image.open(os.path.join(self.base, "files", "img", "ground_layer.png")).convert("RGBA")
         self.trash_source = Image.open(os.path.join(self.base, "files", "img", "trash_can.png")).convert("RGBA")
         self.cans_source = Image.open(os.path.join(self.base, "files", "img", "cans.png")).convert("RGBA")
@@ -84,6 +81,8 @@ class RecyclingUI(CanvasUIFramework):
         self.root.bind("<Return>", lambda event: self.trigger_recycle("plastic_bottle"))
         self.root.bind("<KeyPress-minus>", lambda event: self._request_test_mode())
         self.root.bind("f", lambda event: self.start_fireworks())
+        self.root.bind("c", lambda event: self._simulate_cycle())
+        self.root.bind("t", lambda event: self._handle_machine_status("trash_full"))
         self.root.after(0, self._build_scene)
         self.root.after(50, self._poll_serial)
         self.root.after(50, self._poll_events)
@@ -165,8 +164,11 @@ class RecyclingUI(CanvasUIFramework):
         if not self.running:
             return
         self._prepare_scene()
-        self.firework_particles.clear()
+        self.status_card.destroy()
+        if self.firework_job is not None:
+            self.root.after_cancel(self.firework_job)
         self.firework_job = None
+        self.fireworks = None
         if self.screen_state == "update":
             self._build_update_scene()
             return
@@ -202,64 +204,36 @@ class RecyclingUI(CanvasUIFramework):
             for material, source in self.drop_sources.items()
         }
         self.drop_id = self.canvas.create_image(self._x(540), self._y(-140), image=self.drop_photos["can"][0], anchor="center", state="hidden", tags="drop")
-        self.status_card_id = self.canvas.create_image(self._x(540), self._y(960), state="hidden", tags="status_card")
+        self.fireworks = Fireworks(self, "#a9e5fa", below=self.ground_id)
+        self.status_card.build()
         self._sync_status_card()
-        self._draw_status_card()
 
     def _handle_machine_status(self, command):
-        if command == "crushing_busy":
-            self.crushing_busy = True
-        elif command in ("crushing_idle", "crushing_done"):
-            self.crushing_busy = False
-        elif command == "trash_full":
+        if command == "trash_full":
             self.trash_full = True
+        else:
+            self.cycle.legacy(command)
+        self.crushing_busy = self.cycle.phase in ("crush", "reset")
+        self._sync_status_card()
+
+    def _handle_phase(self, name, remaining_ms):
+        self.cycle.report(name, remaining_ms / 1000)
+        self.crushing_busy = self.cycle.phase in ("crush", "reset")
         self._sync_status_card()
 
     def _sync_status_card(self):
         # A full bin warning persists across crushing transitions.
-        desired = "trash_full" if self.trash_full else "crushing_busy" if self.crushing_busy else None
-        target = 1.0 if desired else 0.0
-        changed = desired is not None and desired != self.status_card_kind
-        if changed:
-            self.status_card_progress = 0.0
-        if desired is not None:
-            self.status_card_kind = desired
-        if target == self.status_card_target and not changed:
-            self._draw_status_card()
-            return
-        self.status_card_target = target
-        self.status_card_from = self.status_card_progress
-        self.status_card_started = time.monotonic()
-        if self.status_card_job is not None:
-            self.root.after_cancel(self.status_card_job)
-            self.status_card_job = None
-        self._animate_status_card()
+        desired = "trash_full" if self.trash_full else self.cycle.phase
+        if desired in PHASES and self.animating and not self.status_card.visible:
+            desired = None  # let the drop animation finish before covering the scene
+        self.status_card.set_kind(desired)
 
-    def _animate_status_card(self):
-        self.status_card_job = None
-        if not self.running or self.screen_state == "error":
-            return
-        elapsed = min(1.0, (time.monotonic() - self.status_card_started) / self.status_card_duration)
-        eased = (1.0 - math.cos(math.pi * elapsed)) / 2.0
-        self.status_card_progress = self.status_card_from + (self.status_card_target - self.status_card_from) * eased
-        if elapsed >= 1.0 and self.status_card_target == 0.0:
-            self.status_card_kind = None
-        self._draw_status_card()
-        if elapsed < 1.0:
-            self.status_card_job = self.root.after(16, self._animate_status_card)
-
-    def _draw_status_card(self):
-        if self.screen_state != "ready" or self.status_card_id is None:
-            return
-        if self.status_card_kind is None or self.status_card_progress <= 0.0:
-            self.canvas.itemconfigure(self.status_card_id, state="hidden")
-            return
-        source = self.status_sources[self.status_card_kind]
-        size = (max(1, round(source.width * self.scale)),
-                max(1, round(source.height * self.scale * self.status_card_progress)))
-        self.status_card_photo = ImageTk.PhotoImage(source.resize(size, Image.Resampling.LANCZOS))
-        self.canvas.itemconfigure(self.status_card_id, image=self.status_card_photo, state="normal")
-        self.canvas.tag_raise(self.status_card_id)
+    def _simulate_cycle(self, speed=3.0):
+        delay = 0.0
+        for name in (*PHASES, "idle"):
+            duration = DEFAULT_DURATIONS.get(name, 0.0) / speed
+            self.root.after(round(delay * 1000), lambda name=name, ms=round(duration * 1000): self._handle_phase(name, ms))
+            delay += duration
 
     def _build_startup_scene(self):
         self.canvas.create_rectangle(
@@ -340,6 +314,7 @@ class RecyclingUI(CanvasUIFramework):
 
     def _complete_animation(self):
         self.animating = False
+        self._sync_status_card()
         if self.pending_events:
             self.trigger_recycle(self.pending_events.popleft())
 
@@ -374,56 +349,22 @@ class RecyclingUI(CanvasUIFramework):
             self.settle_job = None
 
     def start_fireworks(self):
-        colors = ("#ffffff", "#ff5f56", "#ffbd2e", "#27c7f7", "#246bec", "#f57c18")
-        for burst_index in range(5):
-            center_x = random.randint(130, 950)
-            center_y = random.randint(230, 1050)
-            color = colors[(self.count + burst_index) % len(colors)]
-            for particle_index in range(14):
-                angle = math.tau * particle_index / 14 + random.uniform(-0.08, 0.08)
-                speed = random.uniform(5.0, 9.0) * self.scale
-                item = self.canvas.create_oval(0, 0, 0, 0, fill=color, outline="", tags="fireworks")
-                self.canvas.tag_lower(item, self.ground_id)
-                self.firework_particles.append(
-                    {
-                        "item": item,
-                        "x": self._x(center_x),
-                        "y": self._y(center_y),
-                        "vx": math.cos(angle) * speed,
-                        "vy": math.sin(angle) * speed,
-                        "life": random.randint(30, 45),
-                    }
-                )
+        if self.fireworks is None:
+            return
+        self.fireworks.launch(5, seed_index=self.count)
         if self.firework_job is None:
+            self.firework_frame_at = time.monotonic()
             self._animate_fireworks()
 
     def _animate_fireworks(self):
-        alive = []
-        radius = max(2, 6 * self.scale)
-        for particle in self.firework_particles:
-            particle["x"] += particle["vx"]
-            particle["y"] += particle["vy"]
-            particle["vy"] += 0.18 * self.scale
-            particle["vx"] *= 0.985
-            particle["life"] -= 1
-            if particle["life"] <= 0:
-                self.canvas.delete(particle["item"])
-                continue
-            fade = particle["life"] / 45
-            particle_radius = max(1, radius * fade)
-            self.canvas.coords(
-                particle["item"],
-                particle["x"] - particle_radius,
-                particle["y"] - particle_radius,
-                particle["x"] + particle_radius,
-                particle["y"] + particle_radius,
-            )
-            alive.append(particle)
-        self.firework_particles = alive
-        if alive and self.running:
-            self.firework_job = self.root.after(33, self._animate_fireworks)
-        else:
-            self.firework_job = None
+        self.firework_job = None
+        if not self.running or self.fireworks is None:
+            return
+        now = time.monotonic()
+        dt = min(0.05, now - self.firework_frame_at)
+        self.firework_frame_at = now
+        if self.fireworks.update(dt):
+            self.firework_job = self.root.after(16, self._animate_fireworks)
 
     def _poll_events(self):
         if not self.running:
@@ -457,7 +398,7 @@ class RecyclingUI(CanvasUIFramework):
         self._drain_serial_buffer()
 
     def _drain_serial_buffer(self, force=False):
-        commands = (*self.serial_messages, "crushing_busy", "crushing_idle", "crushing_done", "trash_full")
+        commands = (*self.serial_messages, "crushing_busy", "crushing_idle", "crushing_done", "trash_full", "phase:")
         while True:
             matches = []
             for serial_message in commands:
@@ -467,6 +408,18 @@ class RecyclingUI(CanvasUIFramework):
             if not matches:
                 break
             position, serial_message = min(matches, key=lambda match: (match[0], -len(match[1])))
+            if serial_message == "phase:":
+                # phase:<name>:<remaining ms> carries a number, so it needs its own parsing.
+                match = PHASE_MESSAGE.match(self.serial_buffer, position)
+                complete = match is not None and (force or match.end() < len(self.serial_buffer))
+                if not complete:
+                    if not force and PHASE_PARTIAL.fullmatch(self.serial_buffer, position):
+                        break
+                    self.serial_buffer = self.serial_buffer[position + len(serial_message):]
+                    continue
+                self.serial_buffer = self.serial_buffer[match.end():]
+                self._handle_phase(match.group(1), int(match.group(2)))
+                continue
             message_end = position + len(serial_message)
             longer_message_possible = any(
                 candidate.startswith(serial_message) and len(candidate) > len(serial_message)
@@ -479,6 +432,7 @@ class RecyclingUI(CanvasUIFramework):
                 self._handle_machine_status(serial_message)
             else:
                 self.trigger_recycle(self.serial_materials[serial_message])
+                self._handle_machine_status("dropped")
         self.serial_buffer = self.serial_buffer[-256:]
 
     def _poll_serial(self):

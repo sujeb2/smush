@@ -21,6 +21,7 @@ from game.rules import (
     rank_for_accuracy,
 )
 from game.persistence import save_progress, save_seen_tutorials
+from game.result_scene import EXTRA_CHALLENGE_SLIDE
 from game.session import GameSession
 from game.settings import arrange_chart
 from game.selection_sync import publish_selection, read_selection, shared_lock, write_json
@@ -141,7 +142,6 @@ class MinigameFlowMixin:
                 or self.select_morph_in_started is not None
             ):
                 return
-            # Quick presses finish the running wheel turn instead of being dropped.
             self._finish_selection_wheel()
             if lane == 0:
                 self._cycle_selection()
@@ -790,7 +790,14 @@ class MinigameFlowMixin:
 
     def _play_entry_audio(self):
         if self.running and self.scene in ("entry", "warning"):
-            self.audio.play(os.path.join(self.bgm_root, "entry.mp3"), loop=True, fade_ms=320)
+            self.audio.play_layers(
+                self._entry_layer_paths(), level=0, fade_ms=320,
+                fallback_path=os.path.join(self.bgm_root, "entry.mp3"),
+            )
+
+    def _entry_layer_paths(self):
+        # IIDX-style: ENTRY L0 -> WARNING L1 -> MODE SELECT L2 over one synced loop.
+        return [os.path.join(self.bgm_root, f"entry_l{level}.wav") for level in range(3)]
 
     def _start_entry_title_transition(self):
         if self.scene != "entry" or self.entry_title_fade_started is not None:
@@ -807,6 +814,7 @@ class MinigameFlowMixin:
         self._build_scene()
         self.scene_started = time.monotonic() if started_at is None else started_at
         self.warning_deadline = self.scene_started + 3.0
+        self.audio.set_layer_level(1)
         self.root.after(120, lambda: self._play_sfx("card_show.wav") if self.scene == "warning" else None)
         self._print("[AnimationManager] warning visible, duration: 3 seconds")
 
@@ -818,6 +826,7 @@ class MinigameFlowMixin:
         self._build_scene()
         self.scene_started = time.monotonic()
         self.mode_select_deadline = self.scene_started + 20.0
+        self.audio.set_layer_level(2)
         self._print("mode select visible, default: 4K")
 
     def show_select(self):
@@ -1189,7 +1198,7 @@ class MinigameFlowMixin:
         else:
             self.extra_challenge_prompt = last_stage and self._extra_challenge_available()
         self.extra_challenge_started = None
-        self.extra_challenge_offset = 1120.0
+        self.extra_challenge_offset = EXTRA_CHALLENGE_SLIDE
         self.result_rank_voice_played = False
         self.result_rank_sfx_channel = None
         self.result_rank_voice_channel = None

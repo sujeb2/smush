@@ -332,9 +332,11 @@ class Main:
     def _check_webcam(self):
         camera = None
         try:
-            import cv2
+            from camera_select import open_camera
 
-            camera = cv2.VideoCapture(0)
+            model_config = configparser.ConfigParser()
+            model_config.read(os.path.join(base, "files", "model_conf.ini"), encoding="utf-8")
+            camera = open_camera(model_config.getint("GENERIC", "CameraIndex", fallback=-1))
             if not camera.isOpened():
                 return "Webcam could not be opened.\nCheck the connection and camera permission.".upper()
             available, frame = camera.read()

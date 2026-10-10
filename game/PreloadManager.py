@@ -273,6 +273,7 @@ class MinigamePreloadMixin:
         preload_paths.extend(glob.glob(os.path.join(self.sfx_root, "*.mp3")))
         preload_paths.extend(glob.glob(os.path.join(self.voice_root, "*.mp3")))
         preload_paths.append(os.path.join(self.bgm_root, "next.mp3"))
+        preload_paths.extend(self._entry_layer_paths())
         self.audio.preload_sfx(preload_paths)
 
     def _refresh_preload_stage(self, name):

@@ -36,6 +36,7 @@ const unsigned long CONV_SUBSTEPS = CONV_HALF_STEP ? 2UL : 1UL;
 #define MOTOR_RUNNING_FOR 13000UL
 #define MOTOR_RESET_TIME 3000UL
 #define MOTOR_BRAKE_FOR 150UL
+#define PHASE_REPORT_EVERY 1000UL
 
 // debug
 #define DEBUG_CLK 6
@@ -48,6 +49,7 @@ const unsigned long CONV_SUBSTEPS = CONV_HALF_STEP ? 2UL : 1UL;
 #define DEBUG_SEND_ERROR 1202
 #define DEBUG_MOTOR_INIT 2001
 
+#include <stdio.h>
 #include "ConveyorStepper.h"
 #include <TM1637Display.h>
 
@@ -103,6 +105,8 @@ byte pendingSwitch = 0;
 bool crusherRunning = false;
 unsigned long crusherStartedAt = 0;
 unsigned long crusherStoppedAt = 0;
+unsigned long conveyStartedAt = 0;
+unsigned long phaseReportedAt = 0;
 char commandBuffer[64];
 byte commandLength = 0;
 bool commandOverflow = false;
@@ -126,15 +130,51 @@ void softwareReset() {
 #endif
 }
 
+const char *phaseName() {
+  switch (motor_phase) {
+    case CONVEYING: return "convey";
+    case BUSY: return "crush";
+    case PAUSED:
+    case RESETING: return "reset";
+    default: return NULL;
+  }
+}
+
+unsigned long phaseRemaining(unsigned long now) {
+  unsigned long elapsed = 0, length = 0;
+  switch (motor_phase) {
+    case CONVEYING: elapsed = now - conveyStartedAt; length = CONV_FORWARD_FOR; break;
+    case BUSY: elapsed = now - crusherStartedAt; length = MOTOR_RUNNING_FOR; break;
+    case PAUSED: elapsed = now - crusherStoppedAt; length = MOTOR_BRAKE_FOR + MOTOR_RUNNING_FOR; break;
+    case RESETING: elapsed = now - crusherStartedAt; length = MOTOR_RUNNING_FOR; break;
+    default: return 0;
+  }
+  return elapsed < length ? length - elapsed : 0;
+}
+
+// phase:<name>:<remaining ms> drives the UI progress card. It is repeated every
+// second so a PC that connects mid-cycle catches up; crushing_busy rides along
+// for the recognition gate in serial_arduino.py.
+void reportPhase() {
+  const unsigned long now = millis();
+  const char *name = phaseName();
+  char message[32];
+  phaseReportedAt = now;
+  snprintf(message, sizeof(message), "phase:%s:%lu", name ? name : "idle", name ? phaseRemaining(now) : 0UL);
+  sendDebugMessage(message, true);
+  if(motor_phase == BUSY) sendDebugMessage("crushing_busy", true);
+}
+
 void updateCrusher() {
   const unsigned long curtime = millis();
+  if(phaseName() != NULL && curtime - phaseReportedAt >= PHASE_REPORT_EVERY) reportPhase();
 
   switch (motor_phase) { // cruser status
     case BUSY: // crusher running
-      sendDebugMessage("crushing_busy", true);
       if(curtime - crusherStartedAt >= MOTOR_RUNNING_FOR) {
         crusher_stop();
         motor_phase = PAUSED;
+        reportPhase();
       }
       break;
     case PAUSED: // wait pause
@@ -154,6 +194,7 @@ void updateCrusher() {
         motor_phase = IDLE;
         showDebug(DEBUG_READY);
         sendDebugMessage("crushing_done", true);
+        reportPhase();
       }
       break;
     default: break;
@@ -181,8 +222,10 @@ void handleCommand(const char *command) {
 
   conveyor.start(CONV_FORWARD_FOR, CONV_REVERSE);
   conveyorRunning = true;
+  conveyStartedAt = millis();
   motor_phase = CONVEYING;
   sendDebugMessage(object1 ? "obj_dropped1" : "obj_dropped2", false);
+  reportPhase();
 }
 
 void readCommands() {
@@ -241,6 +284,7 @@ void loop() {
         crusherStartedAt = millis();
         crusherRunning = true;
         motor_phase = BUSY;
+        reportPhase();
       }
     }
   }

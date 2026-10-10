@@ -157,7 +157,7 @@ class MinigameGameSceneMixin:
         self.canvas.create_rectangle(
             self._x(40), self._y(470), self._x(1040), self._y(1900),
             fill="" if self.game_media_photo is not None else "#a77dd1",
-            outline="#35bdff", width=max(2, round(5 * self.scale)), tags=("catch_playfield",),
+            outline="", tags=("catch_playfield",),
         )
         particle_photo = self._asset_photo("catch_particle")
         self.canvas.create_image(
@@ -176,9 +176,12 @@ class MinigameGameSceneMixin:
             "", 80, 90, 1725, anchor="w", tags=("catch_hud", "catch_combo"),
         )
         self._text_image("COMBO", 27, 92, 1805, anchor="w", tags=("catch_hud",))
-        self._image("catch_health_bg", 269, 355, anchor="nw", tags=("game_health",))
-        self.health_fill_x = 294.0
-        self.health_fill_y = 405.0
+        # Pinned inside the playfield's top-right corner (playfield spans x 40-1040, y 470-1900).
+        panel_x = 1040 - 20 - self.sources["catch_health_bg"].width
+        panel_y = 470 + 20
+        self._image("catch_health_bg", panel_x, panel_y, anchor="nw", tags=("game_health",))
+        self.health_fill_x = panel_x + 25.0
+        self.health_fill_y = panel_y + 50.0
         self.health_fill_item = self.canvas.create_image(
             self._x(self.health_fill_x), self._y(self.health_fill_y), anchor="w", tags=("game_health",),
         )

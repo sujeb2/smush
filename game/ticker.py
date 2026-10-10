@@ -4,6 +4,16 @@ import time
 
 MAX_LENGTH = 48
 RESEND_SECONDS = 5.0
+DIGITS = 4
+STEP_SECONDS = 0.28  # Keep in step with boardio.ino TICKER_STEP_MS / TICKER_BLINK_MS.
+BLINK_SECONDS = 0.5
+# Segments (bit 0 = A ... bit 6 = G) for ASCII 0x20-0x5F, identical to boardio.ino TICKER_FONT.
+FONT = (
+    0x00, 0x0A, 0x22, 0x00, 0x6D, 0x00, 0x00, 0x02, 0x39, 0x0F, 0x63, 0x40, 0x04, 0x40, 0x08, 0x52,
+    0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F, 0x09, 0x00, 0x58, 0x48, 0x4C, 0x53,
+    0x7B, 0x77, 0x7C, 0x39, 0x5E, 0x79, 0x71, 0x3D, 0x76, 0x30, 0x1E, 0x75, 0x38, 0x37, 0x54, 0x3F,
+    0x73, 0x67, 0x50, 0x6D, 0x78, 0x3E, 0x1C, 0x2A, 0x76, 0x6E, 0x5B, 0x39, 0x64, 0x0F, 0x23, 0x08,
+)
 SCENE_TEXT = {
     "title": "WELCOME TO SMUSH CiTRADE",
     "ci": "WELCOME TO SMUSH CiTRADE",
@@ -58,6 +68,55 @@ def ticker_message(app):
     return "", False
 
 
+def glyph(character):
+    code = ord(character.upper()) if len(character) == 1 else 0
+    return FONT[code - 0x20] if 0x20 <= code <= 0x5F else 0
+
+
+def ticker_frame(text, blink, elapsed):
+    """Segment bytes the board shows `elapsed` seconds after receiving the text."""
+    frame = [0] * DIGITS
+    if len(text) > DIGITS:
+        offset = int(elapsed / STEP_SECONDS) % (len(text) + DIGITS)
+        for digit in range(DIGITS):
+            index = offset + digit - DIGITS
+            if 0 <= index < len(text):
+                frame[digit] = glyph(text[index])
+    elif not blink or int(elapsed / BLINK_SECONDS) % 2 == 0:
+        start = (DIGITS - len(text)) // 2
+        for index, character in enumerate(text):
+            frame[start + index] = glyph(character)
+    return tuple(frame)
+
+
+def render_preview(frame):
+    from PIL import Image, ImageDraw
+
+    lit, unlit = (255, 48, 32, 255), (52, 12, 10, 255)
+    image = Image.new("RGBA", (480, 170), (8, 8, 8, 255))
+    draw = ImageDraw.Draw(image)
+    width, height, thick = 72, 120, 12
+    half = thick / 2
+
+    def horizontal(x, y):
+        return ((x + half, y), (x + thick, y - half), (x + width - thick, y - half),
+                (x + width - half, y), (x + width - thick, y + half), (x + thick, y + half))
+
+    def vertical(x, y):
+        return ((x, y + half), (x + half, y + thick), (x + half, y + height / 2 - thick),
+                (x, y + height / 2 - half), (x - half, y + height / 2 - thick), (x - half, y + thick))
+
+    for digit, segments in enumerate(frame):
+        x, y = 48 + digit * 108, 14
+        shapes = (horizontal(x, y), vertical(x + width, y), vertical(x + width, y + height / 2),
+                  horizontal(x, y + height), vertical(x, y + height / 2), vertical(x, y),
+                  horizontal(x, y + height / 2))
+        for bit, shape in enumerate(shapes):
+            draw.polygon(shape, fill=lit if segments >> bit & 1 else unlit)
+    draw.text((12, 150), "TICKER", fill="white")
+    return image
+
+
 class TickerOutput:
     def __init__(self, report):
         self.report = report
@@ -102,20 +161,43 @@ class TickerOutput:
 class TickerRuntimeMixin:
     def _initialize_ticker(self):
         self.ticker_output = None
+        self.ticker_message = None
+        self.ticker_started = time.monotonic()
+        self.ticker_preview_frame = None
         self.root.after(0, self._tick_ticker)
 
     def _tick_ticker(self):
         if not self.running:
             self._close_ticker()
             return
+        message = ticker_message(self)
+        now = time.monotonic()
+        if message != self.ticker_message:  # Like the firmware, a resend keeps the scroll position.
+            self.ticker_message, self.ticker_started = message, now
         if not self.demo_mode and self.serial is not None:
             if self.ticker_output is None:
                 self.ticker_output = TickerOutput(self._print)
-            self.ticker_output.submit(self.serial, ticker_message(self))
+            self.ticker_output.submit(self.serial, message)
+        self._draw_ticker_preview(now)
         if self.unrecoverable_error:
             self._close_ticker()  # err blink
             return
-        self.root.after(100, self._tick_ticker)
+        self.root.after(40, self._tick_ticker)
+
+    def _draw_ticker_preview(self, now):
+        # Shares the F6 toggle with the demo-mode LED preview.
+        if not (self.demo_mode and self.led_preview_visible):
+            self.canvas.delete("ticker_preview")
+            self.ticker_preview_frame = None
+            return
+        frame = ticker_frame(*self.ticker_message, now - self.ticker_started)
+        if frame != self.ticker_preview_frame or not self.canvas.coords("ticker_preview"):
+            self.canvas.delete("ticker_preview")
+            self.ticker_preview_photo = render_preview(frame)
+            self.canvas.create_image(self._x(540), self._y(570), image=self.ticker_preview_photo,
+                                     anchor="center", tags=("ticker_preview",))
+            self.ticker_preview_frame = frame
+        self.canvas.tag_raise("ticker_preview")
 
     def _close_ticker(self):
         if getattr(self, "ticker_output", None) is not None:

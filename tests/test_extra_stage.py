@@ -8,7 +8,7 @@ from PIL import Image
 
 from game.gameflow import MinigameFlowMixin
 from game.mediaplayer import MinigameMediaMixin
-from game.result_scene import MinigameResultSceneMixin
+from game.result_scene import EXTRA_CHALLENGE_SLIDE, MinigameResultSceneMixin
 from game.osu_chart import discover_osu_supported
 from game.persistence import load_event_ranks, save_progress
 from game.scenemanager import _extra_stage_levels, _is_japanese_title
@@ -171,13 +171,15 @@ class ExtraStageTests(unittest.TestCase):
 
     def test_prompt_slides_up_and_plays_information_once(self):
         game = SimpleNamespace(extra_challenge_prompt=True, result_unlock_at=9,
-                               extra_challenge_started=None, extra_challenge_offset=1120,
+                               extra_challenge_started=None, extra_challenge_offset=EXTRA_CHALLENGE_SLIDE,
                                scale=1, canvas=Mock(), _play_sfx=Mock())
         for now in (10, 10.25, 10.5, 11):
             MinigameResultSceneMixin._animate_extra_challenge_prompt(game, now)
         game._play_sfx.assert_called_once_with("information.wav")
         self.assertEqual(game.extra_challenge_offset, 0)
-        self.assertEqual(sum(call.args[2] for call in game.canvas.move.call_args_list), -1120)
+        self.assertEqual(sum(call.args[2] for call in game.canvas.move.call_args_list), -EXTRA_CHALLENGE_SLIDE)
+        game.canvas.itemconfigure.assert_any_call("extra_challenge", opacity=1.0)
+        game.canvas.itemconfigure.assert_any_call("extra_challenge_dim", opacity=0.55)
 
     def test_buttons_route_to_accept_and_cancel(self):
         game = self.game(running=True, transition_phase=None, loading_phase=None,
@@ -204,14 +206,34 @@ class ExtraStageTests(unittest.TestCase):
         game.show_total_result()
         self.assertFalse(game.extra_challenge_prompt)
 
-    def test_prompt_uses_information_asset_at_view_center(self):
-        game = SimpleNamespace(extra_challenge_offset=0, _image=Mock(), _text_photo=Mock(),
-                               display_font_path="font", scene_photos=[], canvas=Mock(),
-                               _x=lambda x: x, _y=lambda y: y)
+    def test_prompt_band_starts_hidden_below_view_center_over_a_dim_layer(self):
+        band = Mock()
+        game = SimpleNamespace(extra_challenge_offset=EXTRA_CHALLENGE_SLIDE, canvas=Mock(),
+                               _x=lambda x: x, _y=lambda y: y, _scaled_photo=lambda image: image,
+                               _extra_challenge_band_source=lambda: band)
+        game.canvas.create_rectangle.return_value = "dim"
+        game.canvas.create_image.return_value = "band"
         MinigameResultSceneMixin._build_extra_challenge_prompt(game)
-        game._image.assert_called_once_with("information", 540, 960, tags=("extra_challenge",))
-        from game.AssetWorker import IMAGE_PATHS
-        self.assertEqual(IMAGE_PATHS["information"], ("generic", "information.png"))
+        game.canvas.create_rectangle.assert_called_once_with(
+            0, 0, 1080, 1920, fill="#000000", outline="", tags=("extra_challenge_dim",),
+        )
+        game.canvas.create_image.assert_called_once_with(
+            540, 960 + EXTRA_CHALLENGE_SLIDE, image=band, anchor="center", tags=("extra_challenge",),
+        )
+        game.canvas.itemconfigure.assert_any_call("dim", opacity=0.0)
+        game.canvas.itemconfigure.assert_any_call("band", opacity=0.0)
+
+    def test_prompt_band_shows_title_message_and_both_buttons(self):
+        game = SimpleNamespace(sources={}, novecento_demibold_font_path="files/fonts/Novecentosanswide-DemiBold.otf",
+                               display_font_path="files/fonts/KERISKEDU_B.ttf")
+        band = MinigameResultSceneMixin._extra_challenge_band_source(game)
+        self.assertEqual(band.size, (1080, 450))
+        self.assertIs(MinigameResultSceneMixin._extra_challenge_band_source(game), band)
+        # BT1 (sky blue) and BT2 (green) chip centres.
+        red, green, blue, _ = band.getpixel((330, 340))
+        self.assertTrue(160 <= red <= 215 and green > 225 and blue > 245)
+        red, green, blue, _ = band.getpixel((650, 340))
+        self.assertTrue(red < 110 and green > 240 and 120 <= blue <= 185)
 
     def test_cancel_from_third_result_continues_to_total_result(self):
         game = self.game(scene="result", loading_phase=None, result_unlock_at=0,
