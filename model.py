@@ -11,7 +11,6 @@ from ultralytics import YOLO
 from ultralytics.nn import modules as utl_modules
 from ultralytics.nn.tasks import DetectionModel
 import configparser as cfg
-from camera_select import open_camera
 
 def findCompiledDir():
     if "__compiled__" in globals() or getattr(sys, "frozen", False):
@@ -96,7 +95,7 @@ class Model:
         try:
             self.timestamp = datetime.now().strftime('%H:%M:%S')
             print(f'[{self.timestamp}] [ModelRecog] Init model..')
-            self.vc = open_camera(config['GENERIC'].getint('CameraIndex', fallback=-1))
+            self.vc = cv2.VideoCapture(0)
             self.model_path = model_path
             self.serial_ignore = True
             torch.serialization.add_safe_globals(weights)
@@ -142,7 +141,7 @@ class Model:
         self.camera = self.vc
         try:
             if not self.camera.isOpened():
-                self.camera = open_camera(config['GENERIC'].getint('CameraIndex', fallback=-1))
+                self.camera = cv2.VideoCapture(0)
             target_fps = config['GENERIC'].getint('CameraFPS', fallback=480)
             if target_fps > 0:
                 self.camera.set(cv2.CAP_PROP_FPS, target_fps)
@@ -193,7 +192,6 @@ class Model:
                         recognized = self.foundObjs(result)
                         self.names = [name for name, confidence in recognized]
                         self.confident = [confidence for name, confidence in recognized]
-                        # Log only when the recognized set changes; per-frame console output slows the loop.
                         report = tuple(self.names)
                         if result.probs is not None:
                             report += (result.names[result.probs.top1],)
@@ -241,8 +239,6 @@ class Model:
         options = {}
         if self.model.task != 'classify':
             options['conf'] = config['DETECTION'].getfloat('Confidence', fallback=0.5)
-        # Ultralytics re-selects the device per predictor and never picks MPS on its own,
-        # so pass it explicitly. verbose=False stops a log line on every frame.
         return self.model.predict(source=source, stream=True, verbose=False,
                                   device=getattr(self, 'device', None) or self._select_device(), **options)
 
