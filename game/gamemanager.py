@@ -76,43 +76,10 @@ class MinigameGameplayMixin:
     def _move_catcher(self, lane):
         now = time.monotonic()
         self._animate_catcher(now)
-        if self._catch_pot_active(now):
-            return
         direction = -1 if lane == 0 else 1
         self.catcher_velocity = min(920.0, max(-920.0, self.catcher_velocity + direction * 520.0))
 
-    def _set_catch_potentiometer(self, value):
-        if type(value) is not int or not 0 <= value <= 1023:
-            return
-        now = time.monotonic()
-        previous = getattr(self, "catch_pot_value", None)
-        received = getattr(self, "catch_pot_received_at", None)
-        if (previous is None or received is None or now - received > 1.0
-                or abs(value - previous) >= 4 or value in (0, 1023)):
-            self.catch_pot_value = value
-        self.catch_pot_received_at = now
-
-    def _catch_pot_active(self, now):
-        received = getattr(self, "catch_pot_received_at", None)
-        return (getattr(self, "scene", None) == "game"
-                and getattr(self, "game_mode", None) == "catch"
-                and not self._autoplay_active()
-                and getattr(self, "catch_pot_value", None) is not None
-                and received is not None and now - received <= 1.0)
-
     def _animate_catcher(self, now):
-        if self._catch_pot_active(now):
-            target = 180.0 + self.catch_pot_value / 1023.0 * 720.0
-            delta = min(.05, max(0.0, now - self.catcher_last_update)) if self.catcher_last_update is not None else 0.0
-            # Frame-rate-independent smoothing: 95% settled after roughly 90 ms.
-            self.catcher_x += (target - self.catcher_x) * -math.expm1(-delta / .03)
-            if abs(target - self.catcher_x) < .25:
-                self.catcher_x = target
-            self.catcher_velocity = 0.0
-            self.catcher_last_update = now
-            if self.catcher_item is not None:
-                self.canvas.coords(self.catcher_item, self._x(self.catcher_x), self._y(1725))
-            return
         if self.catcher_last_update is None:
             self.catcher_last_update = now
             return

@@ -42,15 +42,12 @@ int pins[20];
 unsigned long millis() { return clockMs; }
 void pinMode(int, int) {}
 int digitalRead(int pin) { return pins[pin]; }
-int analogRead(int) { return 512; }
 struct SerialStub {
   std::vector<std::string> messages;
   void begin(unsigned long) {}
   int available() { return 0; }
   char read() { return 0; }
-  void println(const char *message) {
-    if (strncmp(message, "POT:", 4) != 0) messages.emplace_back(message);
-  }
+  void println(const char *message) { messages.emplace_back(message); }
 } Serial;
 #include "test_io.ino"
 void step(unsigned long time) { clockMs = time; loop(); }

@@ -7,6 +7,7 @@ from game.AnimationFramework import MinigameAnimationMixin
 from game.AssetWorker import load_minigame_assets
 from game.AudioManager import AudioPlayer
 from game.led_runtime import LedRuntimeMixin
+from game.ticker import TickerRuntimeMixin
 from game.gameflow import MinigameFlowMixin
 from game.scenes import MinigameGameSceneMixin
 from game.gamemanager import MinigameGameplayMixin
@@ -47,6 +48,7 @@ from moderngl_framework import ModernGLUIFramework
 
 class MinigameUI(
     LedRuntimeMixin,
+    TickerRuntimeMixin,
     MinigameStateMixin,
     MinigameSettingsMixin,
     MinigamePreloadMixin,
@@ -106,6 +108,7 @@ class MinigameUI(
             self.credit_count += earned
         self._initialize_state()
         self._initialize_leds(config_path, demo_mode)
+        self._initialize_ticker()
         self.recovery_startup = previous_error_details(self.base) is not None
         self.audio = AudioPlayer()
         self.root.bind("<KeyPress>", self._handle_key)
@@ -174,6 +177,7 @@ class MinigameUI(
             except FileNotFoundError:
                 pass
         self._close_leds()
+        self._close_ticker()
         self._close_select_video()
         self._close_game_video()
         self.audio.close()

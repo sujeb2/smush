@@ -96,6 +96,11 @@ class SerialIO:
         # Keep frame shape compatible; the old button-lamp mask is always zero.
         self.write_command("LED0:" + "".join(f"{v:02X}" for p in pixels for v in p))
 
+    def set_ticker(self, text, blink=False):
+        if len(text) > 48 or any(not " " <= c <= "~" for c in text):
+            raise ValueError("ticker text must be at most 48 printable ASCII characters")
+        self.write_command(f"TICK:{'B' if blink else 'S'}:{text}")
+
     @property
     def is_open(self):
         return self.ser.is_open

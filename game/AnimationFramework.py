@@ -550,7 +550,6 @@ class MinigameAnimationMixin:
                 ("btn1", 4 if extra else 0), ("btn2", 5 if extra else 1),
                 (self.settings["button_1"], 0), (self.settings["button_2"], 1),
                 (self.settings["button_3"], 2), (self.settings["button_4"], 3),
-                ("pot:", "pot"),
                 (self.settings["coin_message"], "coin"),
             )
             if command
@@ -572,21 +571,6 @@ class MinigameAnimationMixin:
                 return
             position, action, command = min(matches, key=lambda match: (match[0], -len(match[2])))
             end = position + len(command)
-            if action == "pot":
-                payload = self.serial_buffer[end:]
-                if len(payload) < 5 and all(c in "0123456789" for c in payload):
-                    # Even a forced legacy-button flush must not accept half a value.
-                    self.serial_buffer = self.serial_buffer[position:]
-                    return
-                if (len(payload) >= 5 and payload[4] == ";"
-                        and all(c in "0123456789" for c in payload[:4])):
-                    value = int(payload[:4])
-                    if value <= 1023:
-                        self._set_catch_potentiometer(value)
-                    self.serial_buffer = payload[5:]
-                else:
-                    self.serial_buffer = payload
-                continue
             longer_possible = any(candidate.startswith(command) and len(candidate) > len(command) for candidate in commands)
             if not force and longer_possible and any(
                 candidate.startswith(self.serial_buffer[position:])

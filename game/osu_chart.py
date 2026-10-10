@@ -46,6 +46,8 @@ class OsuManiaChart:
     video_start_time: int = 0
     tempo_points: tuple = ()
     scroll_points: tuple = ()
+    title_ascii: str = ""
+    artist_ascii: str = ""
 
     @cached_property
     def scroll_timeline(self):
@@ -236,6 +238,8 @@ def parse_osu_mania(path, key_count=None, *, allow_extra=False):
         format_version=format_version,
         title=metadata.get("TitleUnicode") or metadata.get("Title") or os.path.basename(folder),
         artist=metadata.get("ArtistUnicode") or metadata.get("Artist") or "UNKNOWN ARTIST",
+        title_ascii=metadata.get("Title", ""),
+        artist_ascii=metadata.get("Artist", ""),
         creator=metadata.get("Creator", "UNKNOWN"),
         difficulty=metadata.get("Version", f"{lane_count}K"),
         overall_difficulty=overall_difficulty,
@@ -356,6 +360,8 @@ def parse_osu_catch(path):
         format_version=format_version,
         title=metadata.get("TitleUnicode") or metadata.get("Title") or os.path.basename(folder),
         artist=metadata.get("ArtistUnicode") or metadata.get("Artist") or "UNKNOWN ARTIST",
+        title_ascii=metadata.get("Title", ""),
+        artist_ascii=metadata.get("Artist", ""),
         creator=metadata.get("Creator", "UNKNOWN"),
         difficulty=metadata.get("Version", "CATCH"),
         overall_difficulty=overall_difficulty,

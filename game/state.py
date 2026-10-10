@@ -149,8 +149,6 @@ class MinigameStateMixin:
         self.judgement_frames = {}
         self.catcher_x = 540.0
         self.catcher_velocity = 0.0
-        self.catch_pot_value = None
-        self.catch_pot_received_at = None
         self.catcher_last_update = None
         self.catcher_item = None
         self.catch_combo_item = None
