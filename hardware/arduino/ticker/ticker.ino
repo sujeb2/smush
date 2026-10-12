@@ -18,7 +18,6 @@ const unsigned long SERIAL_BAUD = 9600;
 const unsigned long POWER_SETTLE_MS = 250;
 const unsigned long MATRIX_REFRESH_MS = 1000;
 const unsigned long ROW_REFRESH_MS = 25;
-const unsigned long BOOT_TEST_MS = 3000;
 const byte MAX7219_NOOP = 0x00;
 const byte MAX7219_DIGIT0 = 0x01;
 const byte MAX7219_DECODE = 0x09;
@@ -49,7 +48,6 @@ const uint8_t TICKER_FONT[64 * GLYPH_WIDTH] PROGMEM = {
 char tickerText[49] = "";
 int tickerWidth = -1;
 bool tickerBlink = false;
-bool bootTest = true;
 unsigned long matrixRefreshedAt = 0;
 unsigned long rowsRefreshedAt = 0;
 byte refreshModule = 0;
@@ -89,7 +87,6 @@ uint8_t textColumn(int x) {
 }
 
 void setTicker(const char *text, bool blink) {
-  bootTest = false;
   if (blink == tickerBlink && strcmp(text, tickerText) == 0) return;
   strncpy(tickerText, text, sizeof(tickerText) - 1);
   tickerText[sizeof(tickerText) - 1] = '\0';
@@ -101,13 +98,7 @@ void setTicker(const char *text, bool blink) {
 void updateTicker(unsigned long now) {
   uint8_t columns[TICKER_WIDTH] = {};
   const unsigned long elapsed = now - tickerStartedAt;
-  if (bootTest && now < BOOT_TEST_MS) {
-    for (byte module = 0; module < MATRIX_COUNT; ++module) {
-      for (byte x = 0; x < GLYPH_WIDTH; ++x) {
-        columns[module * 8 + 1 + x] = pgm_read_byte(TICKER_FONT + ('1' + module - 0x20) * GLYPH_WIDTH + x);
-      }
-    }
-  } else if (tickerWidth > TICKER_WIDTH) {
+  if (tickerWidth > TICKER_WIDTH) {
     const int offset = (elapsed / TICKER_STEP_MS) % (tickerWidth + TICKER_WIDTH);
     for (byte x = 0; x < TICKER_WIDTH; ++x) columns[x] = textColumn(x + offset - TICKER_WIDTH);
   } else if (!tickerBlink || (elapsed / TICKER_BLINK_MS) % 2 == 0) {

@@ -8,7 +8,7 @@ RESEND_SECONDS = 2.0
 WIDTH = 32
 GLYPH_WIDTH = 5
 GLYPH_PITCH = GLYPH_WIDTH + 1
-STEP_MS = 35  # Keep in step with ticker.ino TICKER_STEP_MS / TICKER_BLINK_MS.
+STEP_MS = 100  # Keep in step with ticker.ino TICKER_STEP_MS / TICKER_BLINK_MS.
 BLINK_MS = 500
 # 5x7 columns (bit 0 = top row) for ASCII 0x20-0x5F, identical to ticker.ino TICKER_FONT.
 FONT = (
@@ -30,8 +30,8 @@ FONT = (
     0x02, 0x04, 0x08, 0x10, 0x20, 0x00, 0x41, 0x41, 0x7F, 0x00, 0x04, 0x02, 0x01, 0x02, 0x04, 0x40, 0x40, 0x40, 0x40, 0x40,
 )
 SCENE_TEXT = {
-    "title": "WELCOME TO SMUSH CiTRADE",
-    "ci": "WELCOME TO SMUSH CiTRADE",
+    "title": "CITRADE!!",
+    "ci": "CITRADE!!",
     "demonstration": "DEMO PLAY",
     "entry": "ENTRY",
     "warning": "WARNING",
