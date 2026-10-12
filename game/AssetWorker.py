@@ -123,7 +123,6 @@ def _fit_mode_icon(source):
 
 
 def _rival_watermark(source, whiten=0.74, opacity=0.46):
-    """Wash the rival badge toward white and fade it into the info panel, keeping a hint of its tint."""
     red, green, blue, alpha = source.convert("RGBA").split()
     channels = [channel.point(lambda value: round(value + (255 - value) * whiten)) for channel in (red, green, blue)]
     return Image.merge("RGBA", (*channels, alpha.point(lambda value: round(value * opacity))))

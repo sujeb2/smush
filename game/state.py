@@ -68,7 +68,7 @@ class MinigameStateMixin:
         self.health_fill_item = None
         self.health_fill_x = 853.0
         self.health_fill_y = 1554.0
-        self.judgement_line_y = 1560.0
+        self.judgement_line_y = 1520.0
         self.judgement_item = None
         self.result_time_item = None
         self.select_time_item = None
@@ -183,7 +183,9 @@ class MinigameStateMixin:
         self.settings_card = None
         self.song_index = 0
         self.difficulty_index = 0
-        self.selection_phase = "song"
+        self.folder_index = 0
+        self.folder_cursor = 1
+        self.selection_phase = "folder"
         self.track = self.song_groups[0][0]
         self.select_fade_in_started = None
         self.select_preview_deadline = 0.0

@@ -1,7 +1,3 @@
-"""Run the actual input sketch against a host-side Arduino stub.
-
-This checks button timing/ordering, not AVR compilation or electrical behavior.
-"""
 import pathlib
 import shutil
 import subprocess

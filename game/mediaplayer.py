@@ -147,6 +147,8 @@ class MinigameMediaMixin:
             self.select_video_next_frame = now + self.select_video_frame_interval
 
     def _animate_select_preview(self, now):
+        if self.selection_phase == "folder":
+            return
         if not self.select_preview_started and now >= self.select_preview_deadline:
             self._play_track_preview()
         elif (

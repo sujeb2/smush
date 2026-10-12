@@ -1,3 +1,5 @@
+from collections import namedtuple
+
 MAX_SCORE = 100000
 EVENT_TRACK_COUNT = 3
 TEXT_SCALE = 1.18
@@ -89,6 +91,32 @@ def group_charts_by_song(charts):
         tuple(sorted(grouped[key], key=lambda chart: (chart.level, chart.difficulty.casefold(), chart.path.casefold())))
         for key in order
     )
+
+SongFolder = namedtuple("SongFolder", "name kind level songs")
+
+
+def group_songs_into_folders(song_groups):
+    def by_title(index):
+        first = song_groups[index][0]
+        return first.title.casefold(), first.artist.casefold(), index
+
+    levels = {}
+    artists = {}
+    for index, group in enumerate(song_groups):
+        for chart in group:
+            levels.setdefault(chart.level, set()).add(index)
+        artist = group[0].artist
+        artists.setdefault(artist.casefold(), (artist, set()))[1].add(index)
+    folders = [SongFolder("ALL SONGS", "all", None, tuple(sorted(range(len(song_groups)), key=by_title)))]
+    folders += [
+        SongFolder(f"LEVEL {level}", "level", level, tuple(sorted(songs, key=by_title)))
+        for level, songs in sorted(levels.items())
+    ]
+    folders += [
+        SongFolder(name, "artist", None, tuple(sorted(songs, key=by_title)))
+        for _, (name, songs) in sorted(artists.items())
+    ]
+    return tuple(folders)
 
 def event_result_destination(track_index, cleared):
     if cleared and track_index < EVENT_TRACK_COUNT - 1:

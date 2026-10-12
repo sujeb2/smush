@@ -64,13 +64,6 @@ def ease_out_bounce(t):
 
 
 class MachineCycle:
-    """Tracks the conveyor -> crush -> reset cycle and how far along each phase is.
-
-    New firmware reports `phase:<name>:<remaining ms>` on every transition and once a
-    second. Older firmware only says `crushing_busy` / `crushing_done`, so the cycle is
-    then estimated from the default durations.
-    """
-
     def __init__(self, clock=time.monotonic):
         self.clock = clock
         self.phase = None
@@ -100,7 +93,6 @@ class MachineCycle:
             self.phase = None
 
     def tick(self):
-        """Advances estimated phases; reported phases wait for the firmware instead."""
         if self.phase is None or self.reported or self.clock() < self.ends_at:
             return False
         following = {"convey": "crush", "crush": "reset"}.get(self.phase)
@@ -127,8 +119,6 @@ class MachineCycle:
 
 
 class StatusCard:
-    """Slide-up card over the counter scene for crusher phases and the full-bin warning."""
-
     def __init__(self, ui, cycle, font_path):
         self.ui = ui
         self.cycle = cycle
@@ -155,7 +145,6 @@ class StatusCard:
         return self.kind is not None and self.reveal > 0.0
 
     def build(self):
-        """Creates canvas items for the current scale; call after the scene is rebuilt."""
         ui = self.ui
         canvas = ui.canvas
         self.text_cache.clear()
@@ -207,7 +196,6 @@ class StatusCard:
         self._render()
 
     def set_kind(self, kind):
-        """Shows the card for kind (a phase or "trash_full"), or hides it for None."""
         family = lambda value: None if value is None else "full" if value == "trash_full" else "cycle"
         if kind is None:
             self._animate_reveal(0.0)

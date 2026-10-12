@@ -46,7 +46,7 @@ class MinigameGameSceneMixin:
         if extra:
             self.lane_origin_x = 169.0
             self.lane_width = 186.25
-            self.judgement_line_y = 1850.0
+            self.judgement_line_y = 1810.0
             self._image("main_layer_4k_extra", 0, 520, anchor="nw", tags=("game",))
             self.note_photos = tuple(self._asset_photo(f"note_4k_{lane % 2}") for lane in range(4)) + (
                 self._asset_photo("note_extra_0"), self._asset_photo("note_extra_1"),
@@ -55,7 +55,7 @@ class MinigameGameSceneMixin:
         elif self.game_mode == "4k":
             self.lane_origin_x = 173.0
             self.lane_width = 183.5
-            self.judgement_line_y = 1850.0
+            self.judgement_line_y = 1810.0
             self.health_background_x = 952.0
             self.health_background_y = 1085.0
             self.health_fill_x = 970.0
@@ -67,7 +67,7 @@ class MinigameGameSceneMixin:
         else:
             self.lane_origin_x = 290.0
             self.lane_width = 250.0
-            self.judgement_line_y = 1560.0
+            self.judgement_line_y = 1520.0
             self.health_background_x = 835.0
             self.health_background_y = 655.0
             self.health_fill_x = 853.0

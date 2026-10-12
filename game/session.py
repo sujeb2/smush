@@ -1,5 +1,3 @@
-"""Gameplay rules and session data, independent of rendering, audio and hardware."""
-
 from dataclasses import dataclass, field
 
 from game.rules import (
@@ -86,7 +84,6 @@ class GameSession:
         return previous_health
 
     def advance_holds(self, elapsed):
-        """Yield the old health for each tick, applying each tick exactly once."""
         for index, state in tuple(self.active_holds.items()):
             ticks = state["ticks"]
             while state["next"] < len(ticks) and elapsed >= ticks[state["next"]]:
@@ -101,10 +98,6 @@ class GameSession:
 
 
 def session_field(name):
-    """Temporary view adapter while scenes migrate to explicit session access.
-
-    There is only one copy of each value; legacy scene attributes delegate to it.
-    """
     return property(
         lambda view: getattr(view.gameplay, name),
         lambda view, value: setattr(view.gameplay, name, value),

@@ -77,7 +77,6 @@ class AudioPlayer:
         self.current_path = None
 
     def play_layers(self, paths, level=0, fade_ms=0, fallback_path=None):
-        """Loop stems in sync; stems above `level` stay muted until set_layer_level."""
         self.stop()
         if not self.available:
             return

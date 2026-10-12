@@ -2,13 +2,15 @@ import pathlib
 import shutil
 import subprocess
 import tempfile
+import threading
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import re
 
-from game.ticker import FONT, TickerRuntimeMixin, render_preview, song_label, ticker_frame, ticker_message, ticker_text
+from game.ticker import (FONT, TickerRuntimeMixin, render_preview, song_label, ticker_frame, ticker_message,
+                         ticker_port, ticker_text)
 from serial_arduino import SerialIO
 
 
@@ -54,29 +56,37 @@ class TickerTextTests(unittest.TestCase):
                 serial_io.set_ticker("夜")
 
 
+SKETCH = pathlib.Path(__file__).resolve().parents[1] / "hardware/arduino/ticker/ticker.ino"
+
+
+def columns(text):
+    return tuple(FONT[(ord(c) - 0x20) * 5 + i] if i < 5 else 0 for c in text for i in range(6))[:-1]
+
+
 class TickerPreviewTests(unittest.TestCase):
     def test_font_matches_firmware(self):
-        sketch = pathlib.Path(__file__).resolve().parents[1] / "hardware/arduino/boardio/boardio.ino"
-        table = re.search(r"TICKER_FONT\[64\] PROGMEM = \{(.*?)\};", sketch.read_text(), re.S).group(1)
+        table = re.search(r"TICKER_FONT\[64 \* GLYPH_WIDTH\] PROGMEM = \{(.*?)\};", SKETCH.read_text(), re.S).group(1)
         self.assertEqual(tuple(int(value, 16) for value in re.findall(r"0x[0-9A-F]{2}", table)), FONT)
 
-    def test_frames_follow_firmware_timing(self):
-        self.assertEqual(ticker_frame("HI", False, 0), (0, 0x76, 0x30, 0))
-        self.assertEqual(ticker_frame("ABCDE", False, 0), (0, 0, 0, 0))
-        self.assertEqual(ticker_frame("ABCDE", False, 0.28), (0, 0, 0, 0x77))
-        self.assertEqual(ticker_frame("abcde", False, 0.28 * 5), (0x7C, 0x39, 0x5E, 0x79))
-        self.assertEqual(ticker_frame("ERR", True, 0.2), (0x79, 0x50, 0x50, 0))
-        self.assertEqual(ticker_frame("ERR", True, 0.7), (0, 0, 0, 0))
+    def test_frames_center_scroll_and_blink(self):
+        self.assertEqual(ticker_frame("HI", False, 0), (0,) * 10 + columns("HI") + (0,) * 11)
+        self.assertEqual(ticker_frame("SMUSH", False, 0), (0,) * 1 + columns("SMUSH") + (0,) * 2)
+        self.assertEqual(ticker_frame("WELCOME", False, 0), (0,) * 32)
+        self.assertEqual(ticker_frame("welcome", False, 0.035), (0,) * 31 + columns("W")[:1])
+        self.assertEqual(ticker_frame("WELCOME", False, 0.035 * 32), columns("WELCOME")[:32])
+        self.assertEqual(ticker_frame("WELCOME", False, 0.035 * (41 + 32)), (0,) * 32)
+        self.assertEqual(ticker_frame("ERR", True, 0.7), (0,) * 32)
+        self.assertEqual(ticker_frame("", False, 0), (0,) * 32)
 
-    def test_preview_lights_only_requested_segments(self):
-        image = render_preview((0x01, 0x40, 0, 0x7F))
+    def test_preview_lights_only_requested_dots(self):
+        image = render_preview((0x01,) + (0,) * 7 + (0x80,) + (0,) * 23)
         lit = (255, 48, 32, 255)
-        self.assertEqual(image.getpixel((48 + 36, 14)), lit)  # digit 1, segment A
-        self.assertNotEqual(image.getpixel((48 + 36, 74)), lit)  # digit 1, segment G
-        self.assertEqual(image.getpixel((156 + 36, 74)), lit)  # digit 2, segment G
-        self.assertNotEqual(image.getpixel((264 + 36, 74)), lit)  # digit 3 is blank
+        self.assertEqual(image.getpixel((21, 19)), lit)  # column 0, top row
+        self.assertNotEqual(image.getpixel((21, 32)), lit)  # column 0, second row
+        self.assertEqual(image.getpixel((16 + 8 * 13 + 8 + 5, 14 + 7 * 13 + 5)), lit)  # module 2, bottom row
+        self.assertNotEqual(image.getpixel((16 + 13 + 5, 19)), lit)
 
-    def test_demo_preview_follows_led_toggle_and_keeps_scroll_on_resend(self):
+    def runtime(self):
         class Runtime(TickerRuntimeMixin):
             pass
 
@@ -84,20 +94,25 @@ class TickerPreviewTests(unittest.TestCase):
         runtime.root, runtime.canvas = Mock(), Mock()
         runtime.canvas.coords.return_value = [540, 570]
         runtime._x = runtime._y = lambda value: value
+        runtime._print = Mock()
         runtime.running, runtime.unrecoverable_error = True, None
-        runtime.demo_mode, runtime.serial, runtime.led_preview_visible = True, None, False
+        runtime.demo_mode, runtime.led_preview_visible, runtime.station = True, False, 1
         runtime.scene, runtime.track = "title", track()
+        return runtime
+
+    def test_demo_preview_follows_led_toggle_and_keeps_scroll_on_resend(self):
+        runtime = self.runtime()
         with patch("game.ticker.time.monotonic", return_value=100.0):
-            runtime._initialize_ticker()
+            runtime._initialize_ticker("missing.ini")
             runtime._tick_ticker()
         runtime.canvas.create_image.assert_not_called()
         runtime.led_preview_visible = True
-        with patch("game.ticker.time.monotonic", return_value=100.28):
+        with patch("game.ticker.time.monotonic", return_value=100.035):
             runtime._tick_ticker()
-        self.assertEqual(runtime.ticker_preview_frame, (0, 0, 0, FONT[ord("W") - 0x20]))
+        self.assertEqual(runtime.ticker_preview_frame, (0,) * 31 + columns("W")[:1])
         runtime.canvas.create_image.assert_called_once()
         self.assertEqual(runtime.canvas.create_image.call_args.kwargs["tags"], ("ticker_preview",))
-        with patch("game.ticker.time.monotonic", return_value=100.29):
+        with patch("game.ticker.time.monotonic", return_value=100.036):
             runtime._tick_ticker()  # Same frame: no redraw.
         runtime.canvas.create_image.assert_called_once()
         runtime.led_preview_visible = False
@@ -105,53 +120,56 @@ class TickerPreviewTests(unittest.TestCase):
         runtime.canvas.delete.assert_called_with("ticker_preview")
         self.assertIsNone(runtime.ticker_preview_frame)
 
+    def test_ticker_port_from_environment_or_config_and_only_station_one_connects(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = pathlib.Path(directory) / "main.ini"
+            config.write_text("[SERIAL]\nTickerPort = COM9\nSerialBaudrate = 9600\n")
+            with patch.dict("os.environ", {}, clear=True):
+                self.assertEqual(ticker_port(config), "COM9")
+            with patch.dict("os.environ", {"SMUSH_TICKER_PORT": "COM7"}):
+                self.assertEqual(ticker_port(config), "COM7")
+            for demo_mode, station, connects in ((False, 1, True), (False, 2, False), (True, 1, False)):
+                runtime = self.runtime()
+                runtime.demo_mode, runtime.station = demo_mode, station
+                with patch.dict("os.environ", {}, clear=True), patch("serial_arduino.SerialIO") as serial_io:
+                    runtime._initialize_ticker(config)
+                    for thread in threading.enumerate():
+                        if thread.name == "smush-ticker-serial":
+                            thread.join(1)
+                self.assertEqual(serial_io.called, connects)
+                if connects:
+                    serial_io.assert_called_once_with("COM9", 9600, 1)
+                    self.assertIs(runtime.ticker_serial, serial_io.return_value)
 
-class BoardIOTickerFirmwareTests(unittest.TestCase):
-    def test_scroll_center_blink_and_resend(self):
+
+class TickerFirmwareTests(unittest.TestCase):
+    def test_matrix_output_matches_preview(self):
         compiler = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
         if compiler is None:
             self.skipTest("C++ compiler unavailable for firmware simulation")
-        sketch = pathlib.Path(__file__).resolve().parents[1] / "hardware/arduino/boardio/boardio.ino"
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
-            (root / "Adafruit_NeoPixel.h").write_text(r'''
-#pragma once
-#define NEO_GRB 0
-#define NEO_KHZ800 0
-class Adafruit_NeoPixel {
-public:
-  Adafruit_NeoPixel(int, int, int) {}
-  void begin() {} void clear() {} void show() {}
-  void setPixelColor(int, int, int, int) {}
-};
-''')
-            (root / "TM1637Display.h").write_text(r'''
-#pragma once
+            (root / "test.cpp").write_text(r"""
 #include <cstdint>
-#include <cstring>
-struct TM1637Display {
-  uint8_t shown[4] = {}; int writes = 0;
-  TM1637Display(int, int, unsigned int) {}
-  void setBrightness(int) {}
-  void setSegments(const uint8_t *s) { memcpy(shown, s, 4); ++writes; }
-};
-''')
-            (root / "test.cpp").write_text(r'''
-#include <cassert>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
+#include <iostream>
 #include <string>
 #include <vector>
 using byte = unsigned char;
 #define PROGMEM
 #define pgm_read_byte(address) (*(address))
-constexpr int LOW = 0, HIGH = 1, INPUT = 0, INPUT_PULLUP = 2, A5 = 19;
+constexpr int LOW = 0, HIGH = 1, OUTPUT = 1, MSBFIRST = 1;
 unsigned long clockMs = 0;
-int pins[20];
+int pins[20] = {}, modes[20] = {};
+uint16_t shifted[20] = {}; // Keyed by DIN pin.
+uint8_t registers[4][16] = {};
+int writes = 0;
 unsigned long millis() { return clockMs; }
-void pinMode(int, int) {}
-int digitalRead(int pin) { return pins[pin]; }
+void delay(unsigned long ms) { clockMs += ms; }
+void pinMode(int pin, int mode) { modes[pin] = mode; }
+void delayMicroseconds(unsigned int) {}
+void digitalWrite(int pin, int value);
 struct SerialStub {
   std::string input; std::vector<std::string> messages;
   void begin(unsigned long) {}
@@ -159,41 +177,91 @@ struct SerialStub {
   char read() { char c = input.front(); input.erase(0, 1); return c; }
   void println(const char *m) { messages.emplace_back(m); }
 } Serial;
-#include "boardio.ino"
-void step(unsigned long time, const std::string &input = "") { clockMs = time; Serial.input += input; loop(); }
-bool shows(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
-  const uint8_t expected[4] = {a, b, c, d};
-  return memcmp(ticker.shown, expected, 4) == 0;
+#include "ticker.ino"
+void digitalWrite(int pin, int value) {
+  for (byte m = 0; m < MATRIX_COUNT; ++m) {
+    if (MATRIX_PINS[m][0] == pin && value == HIGH && pins[pin] == LOW) {
+      const int din = MATRIX_PINS[m][2];
+      shifted[din] = shifted[din] << 1 | pins[din]; // MAX7219 samples DIN on the rising CLK edge.
+    }
+    if (MATRIX_PINS[m][1] == pin && value == HIGH && pins[pin] == LOW) {
+      const uint16_t word = shifted[MATRIX_PINS[m][2]];
+      registers[m][word >> 8 & 0x0F] = word & 0xFF;
+      ++writes;
+    }
+  }
+  pins[pin] = value;
+}
+int decodedColumn(byte x) {
+  int column = 0;
+  for (byte digit = 0; digit < 8; ++digit) {
+    for (byte bit = 0; bit < 8; ++bit) {
+      byte row = digit, physical = 7 - bit;
+      for (byte turn = 0; turn < MATRIX_ROTATION % 4; ++turn) {
+        const byte previous = row;
+        row = physical;
+        physical = 7 - previous;
+      }
+      if (MATRIX_MIRROR) physical = 7 - physical;
+      if (physical == x % 8 && registers[x / 8][1 + digit] >> bit & 1) column |= 1 << row;
+    }
+  }
+  return column;
 }
 int main() {
-  for (auto &pin : pins) pin = HIGH;
   setup();
-  step(1000, "TICK:S:HI\n");
-  assert(shows(0, 0x76, 0x30, 0)); // Centered: H I
-  step(1000, "TICK:S:ABCDE\n");
-  assert(shows(0, 0, 0, 0)); // Long text starts off-screen.
-  step(1280); assert(shows(0, 0, 0, 0x77)); // A enters from the right.
-  step(1000 + 280 * 4); assert(shows(0x77, 0x7C, 0x39, 0x5E));
-  step(1000 + 280 * 5); assert(shows(0x7C, 0x39, 0x5E, 0x79));
-  const int writes = ticker.writes;
-  step(1000 + 280 * 5 + 10, "TICK:S:abcde\n"); // Lowercase is a different string: restarts.
-  assert(shows(0, 0, 0, 0));
-  step(2410 + 280 * 4, "TICK:S:abcde\n"); // Identical resend keeps scrolling position.
-  assert(ticker.writes > writes && shows(0x77, 0x7C, 0x39, 0x5E));
-  step(4000, "TICK:B:ERR\n"); assert(shows(0x79, 0x50, 0x50, 0));
-  step(4500); assert(shows(0, 0, 0, 0));
-  step(5000); assert(shows(0x79, 0x50, 0x50, 0));
-  step(5100, "TICK:X:BAD\n"); assert(shows(0x79, 0x50, 0x50, 0)); // Unknown mode is ignored.
-  pins[2] = LOW; step(5200); // Buttons still report while the ticker runs.
-  assert(Serial.messages.back() == "Forwarded");
+  loop();
+  const uint8_t one[8] = {0x00, 0x00, 0x42, 0x7F, 0x40, 0x00, 0x00, 0x00}; // Boot test: module 1 shows "1".
+  for (byte x = 0; x < 8; ++x) if (decodedColumn(x) != one[x]) return 5;
+  for (byte m = 0; m < MATRIX_COUNT; ++m) {
+    for (byte p = 0; p < 3; ++p) if (modes[MATRIX_PINS[m][p]] != OUTPUT) return 2;
+    if (registers[m][0x0C] != 1 || registers[m][0x0B] != 7 || registers[m][0x09] != 0) return 3;
+  }
+  std::string line;
+  while (std::getline(std::cin, line)) {
+    const size_t space = line.find(' ');
+    clockMs = std::stoul(line.substr(0, space));
+    if (space != std::string::npos) Serial.input += line.substr(space + 1) + "\n";
+    loop();
+    std::printf("%d", writes);
+    for (byte x = 0; x < 32; ++x) {
+      std::printf(" %02X", decodedColumn(x));
+    }
+    std::printf("\n");
+  }
+  for (byte m = 0; m < MATRIX_COUNT; ++m) if (shifted[MATRIX_PINS[m][2]] != 0) return 7; // No-op parked.
+  registers[1][5] ^= 0xFF; // Stray dots from a noise pulse.
+  for (byte i = 0; i < MATRIX_COUNT; ++i) { clockMs += 25; loop(); }
+  if (registers[1][5] != shownRows[1][4]) return 8;
+  registers[2][0x0F] = 1; registers[2][0x0C] = 0; registers[2][3] = 0xFF; // Glitched module.
+  clockMs += 1000; loop();
+  if (registers[2][0x0F] != 0 || registers[2][0x0C] != 1 || registers[2][3] != shownRows[2][2]) return 6;
+  return Serial.messages == std::vector<std::string>{"READY:TICKER"} ? 0 : 4;
 }
-''')
+""")
             executable = root / "firmware-test"
-            subprocess.run([compiler, "-std=c++11", "-I", str(root), "-I", str(sketch.parent),
-                            str(root / "test.cpp"), "-o", str(executable)],
-                           check=True, capture_output=True, text=True)
-            result = subprocess.run([str(executable)], capture_output=True, text=True)
+            subprocess.run([compiler, "-std=c++11", "-I", str(SKETCH.parent), str(root / "test.cpp"),
+                            "-o", str(executable)], check=True, capture_output=True, text=True)
+            script = [
+                (1000, "TICK:S:HI", "HI", False, 0),
+                (1200, "", "HI", False, 0.2),
+                (2000, "TICK:S:WELCOME TO SMUSH", "WELCOME TO SMUSH", False, 0),
+                (2035, "", "WELCOME TO SMUSH", False, 0.035),
+                (2700, "", "WELCOME TO SMUSH", False, 0.7),
+                (3000, "TICK:S:WELCOME TO SMUSH", "WELCOME TO SMUSH", False, 1.0),  # Resend keeps position.
+                (3100, "TICK:B:ERR", "ERR", True, 0),
+                (3700, "", "ERR", True, 0.6),
+                (4100, "", "ERR", True, 1.0),
+                (4200, "TICK:X:BAD", "ERR", True, 1.1),
+                (4300, "TICK:S:" + "A" * 80, "ERR", True, 1.2),  # Oversized command is discarded.
+            ]
+            stdin = "".join(f"{time} {command}\n" if command else f"{time}\n" for time, command, *_ in script)
+            result = subprocess.run([str(executable)], input=stdin, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
+            lines = result.stdout.splitlines()
+            for (time, command, text, blink, elapsed), line in zip(script, lines):
+                shown = tuple(int(value, 16) for value in line.split()[1:])
+                self.assertEqual(shown, ticker_frame(text, blink, elapsed), (time, command))
 
 
 if __name__ == "__main__":

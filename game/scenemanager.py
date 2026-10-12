@@ -1,8 +1,9 @@
+import functools
 import math
 import os
 import time
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from game.rules import EVENT_TRACK_COUNT, TEXT_SCALE
 from ui_framework import DESIGN_HEIGHT, DESIGN_WIDTH
@@ -19,8 +20,27 @@ _SELECTION_WHEEL_POINTS = {
 }
 
 
+# Light text with a soft drop shadow; folders are gold.
+SELECTION_SHADOW = (40, 14, 58, 170)
+# Denser shadow for the paler centre card; values over 255 saturate the blur.
+SELECTION_CARD_SHADOW_ALPHA = 240
+SELECTION_FOLDER_COLOR = "#ffe08a"
+
+
+@functools.lru_cache(maxsize=64)
+def _font(path, size):
+    return ImageFont.truetype(path, size)
+
+
+def _selection_font_name(text):
+    if any("\u3130" <= character <= "\u318f" or "\uac00" <= character <= "\ud7a3" for character in text):
+        return "Cafe24Ssurround-v2.0.otf"
+    if any(ord(character) > 0x24F for character in text):
+        return "nagino.otf"
+    return None
+
+
 def _selection_wheel_point(offset):
-    """Position on a smooth (Catmull-Rom) arc through the wheel slots, for a fractional slot."""
     reach = SELECTION_WHEEL_REACH
     offset = min(reach, max(-reach, offset))
     index = min(reach - 1, math.floor(offset))
@@ -34,7 +54,6 @@ def _selection_wheel_point(offset):
 
 
 def _selection_wheel_opacity(offset):
-    """Cards fade as they turn into the centre card and as they leave past the outer slots."""
     distance = abs(offset)
     return min(1.0, distance) * min(1.0, max(0.0, SELECTION_WHEEL_REACH - distance))
 
@@ -47,7 +66,6 @@ def _is_japanese_title(title):
 
 
 def _extra_stage_levels(charts, selected=None):
-    """Place available charts under the template's EASY, NORMAL, HARD labels."""
     slots = [None, None, None]
     remaining = []
     for chart in charts:
@@ -260,6 +278,52 @@ class MinigameSceneMixin:
         return self.canvas.create_image(
             self._x(x), self._y(y), image=self._text(text, size, color, align), anchor=anchor, tags=tags,
         )
+
+    def _selection_text_photo(self, text, size, max_width, color="white", shadow=True):
+        key = "selection", text, size, max_width, color, shadow, round(self.scale, 5)
+        cached = self.text_cache.get(key)
+        if cached is not None:
+            self.text_cache.move_to_end(key)
+            return cached
+        font_name = _selection_font_name(text)
+        font_path = (os.path.join(self.base, "files", "fonts", font_name) if font_name
+                     else self.novecento_demibold_font_path)
+        size = round(size * TEXT_SCALE)
+        font = _font(font_path, size)
+        width = font.getlength(text)
+        if width > max_width:
+            size = max(round(size * 0.8), math.floor(size * max_width / width))
+            font = _font(font_path, size)
+            if font.getlength(text) > max_width:
+                while len(text) > 1 and font.getlength(text + "...") > max_width:
+                    text = text[:-1]
+                text = text.rstrip() + "..."
+        box = font.getbbox(text)
+        blur = max(2, round(size * 0.1)) if shadow else 0
+        drop = max(1, round(size * 0.06)) if shadow else 0
+        padding = 4 + blur * 2
+        source = Image.new("RGBA", (box[2] - box[0] + padding * 2, box[3] - box[1] + padding * 2 + drop))
+        origin = (padding - box[0], padding - box[1])
+        if shadow:
+            mask = Image.new("L", source.size)
+            ImageDraw.Draw(mask).text((origin[0], origin[1] + drop), text, font=font, fill=255)
+            mask = mask.filter(ImageFilter.GaussianBlur(blur))
+            alpha = SELECTION_SHADOW[3] if shadow is True else shadow
+            source.paste(SELECTION_SHADOW[:3], mask=mask.point(lambda value: min(255, value * alpha // 255)))
+        ImageDraw.Draw(source).text(origin, text, font=font, fill=color)
+        # Corner-anchored callers need the padding to place the glyphs.
+        cached = self._scaled_photo(source), padding
+        self.text_cache[key] = cached
+        while len(self.text_cache) > TEXT_CACHE_LIMIT:
+            self.text_cache.popitem(last=False)
+        return cached
+
+    def _selection_text(self, text, size, x, y, *, max_width, color="white", shadow=True, anchor="center", tags=()):
+        photo, padding = self._selection_text_photo(text, size, max_width, color, shadow)
+        if anchor == "nw":
+            # Skip the shadow margin so the glyphs stay where plain text would sit.
+            x, y = x - (padding - 4), y - (padding - 4)
+        return self.canvas.create_image(self._x(x), self._y(y), image=photo, anchor=anchor, tags=tags)
 
     def _build_common_background(self):
         self.particle_base_y = 420
@@ -541,7 +605,7 @@ class MinigameSceneMixin:
         if getattr(self, "extra_stage_active", False):
             self._build_extra_select()
             return
-        heading = "MUSIC SELECT" if self.selection_phase == "song" else "DIFFICULTY SELECT"
+        heading = "DIFFICULTY SELECT" if self.selection_phase == "difficulty" else "MUSIC SELECT"
         self.selection_heading_item = self._text_image(heading, 54, 70, 755, anchor="w", tags=("select",))
         self._text_image("TIME LEFT", 18, 970, 725, tags=("select", "select_time"))
         remaining = max(0, int(self.select_deadline - time.monotonic() + 0.999))
@@ -626,8 +690,12 @@ class MinigameSceneMixin:
         self.down_button_item = self._image("down_button", 540, self.down_button_base_y, tags=tags)
 
     def _selection_choices(self):
+        if self.selection_phase == "folder":
+            return tuple(folder.name for folder in self._song_folders()), self.folder_index
         if self.selection_phase == "song":
-            return tuple(group[0].title for group in self.song_groups), self.song_index
+            folder = self._current_folder()
+            titles = tuple(self.song_groups[index][0].title for index in folder.songs)
+            return (folder.name, *titles), self.folder_cursor
         return tuple(chart.difficulty for chart in self.song_groups[self.song_index]), self.difficulty_index
 
     def _build_selection_list(self, tags):
@@ -638,7 +706,6 @@ class MinigameSceneMixin:
         self._build_selection_card(tags)
 
     def _build_selection_previews(self, tags, direction=0):
-        """Neighbour cards on the wheel; with a direction they start one slot back for the rotation."""
         choices, selected = self._selection_choices()
         entries = {}
         # Nearest slots first (+1 before -1) so short lists that repeat a choice keep the copy
@@ -659,16 +726,27 @@ class MinigameSceneMixin:
         for choice_index, (start, end) in sorted(entries.items(), key=lambda entry: abs(entry[1][1])):
             x, y = _selection_wheel_point(start)
             card = self._image("previous", x, y, tags=(*tags, "select_preview"))
-            label = self._text_image(choices[choice_index].upper(), 27, x, y + self._selection_label_shift(start),
-                                     color="#ead7fb", tags=(*tags, "select_preview"))
+            label = self._selection_text(
+                choices[choice_index].upper(), 27, x, y + self._selection_label_shift(start),
+                max_width=min(self._selection_label_width(start), self._selection_label_width(end)),
+                color=SELECTION_FOLDER_COLOR if self._selection_choice_is_folder(choice_index) else "white",
+                tags=(*tags, "select_preview"),
+            )
             self.selection_preview_items.append((card, label, start, end))
         if direction:
             self._place_selection_previews(0.0)
         # Neighbour cards are rebuilt after the centre card, so lift its overlays back above them.
         self.canvas.tag_raise("select_overlay")
 
+    def _selection_choice_is_folder(self, choice_index):
+        return self.selection_phase == "folder" or (self.selection_phase == "song" and choice_index == 0)
+
+    def _selection_label_width(self, offset):
+        x, _ = _selection_wheel_point(offset)
+        half_card = self.sources["previous"].width / 2
+        return max(120, round(2 * min(half_card - 30, DESIGN_WIDTH - 24 - x)))
+
     def _selection_label_shift(self, offset):
-        """The -2 card covers the top of the -1 card; keep the -1 name in the strip still visible."""
         if getattr(self, "selection_choice_count", 0) < 5:
             return 0.0
         half_height = self.sources["previous"].height / 2
@@ -691,6 +769,9 @@ class MinigameSceneMixin:
 
     def _build_selection_card(self, tags):
         tags = (*tags, "select_card")
+        if self._on_folder_card():
+            self._build_folder_card(tags)
+            return
         self._prepare_select_media(self.track)
         has_media = self.select_media_photo is not None
         if has_media:
@@ -703,16 +784,10 @@ class MinigameSceneMixin:
             self.select_media_item = self.canvas.create_image(
                 self._x(90), self._y(1175), image=self.select_media_photo, anchor="nw", tags=tags,
             )
-        title_size = 38 if len(self.track.title) <= 20 else max(25, round(38 * 20 / len(self.track.title)))
         detail = self.track.artist if self.selection_phase == "song" else self.track.difficulty
-        if has_media:
-            self._text_image(self.track.title.upper(), title_size, 290, 1200, anchor="nw", tags=tags)
-            self._text_image(detail.upper(), 26, 290, 1265, anchor="nw", tags=tags)
-        else:
-            self._text_image(self.track.title.upper(), title_size, 100, 1288, anchor="w", tags=tags)
-            self._text_image(detail.upper(), 26, 100, 1295, anchor="w", tags=tags)
-        self._text_image(str(self.track.level), 92, 930, 1230, tags=tags)
-        self._text_image("LEVEL", 21, 930, 1305, tags=tags)
+        self._build_selection_card_text(
+            self.track.title.upper(), detail.upper(), str(self.track.level), "LEVEL", 290 if has_media else 100, tags,
+        )
         self.scroll_speed_warning_item = None
         self.scroll_speed_warning_offset = 0.0
         if self.track.has_scroll_speed_changes:
@@ -720,6 +795,29 @@ class MinigameSceneMixin:
                 "scrollspeed_warn", 115, 1440, anchor="nw", tags=(*tags, "select_overlay"),
             )
 
+    def _build_folder_card(self, tags):
+        folder = self._current_folder()
+        self.select_media_item = None
+        self.scroll_speed_warning_item = None
+        self.scroll_speed_warning_offset = 0.0
+        if self.selection_phase == "folder":
+            detail = {"all": "EVERY SONG", "level": "LEVEL FOLDER"}.get(folder.kind, "ARTIST FOLDER")
+        else:
+            detail = "PRESS BTN1 TO CLOSE"
+        self._build_selection_card_text(
+            folder.name.upper(), detail, str(len(folder.songs)), "SONGS", 100, tags,
+            title_color=SELECTION_FOLDER_COLOR,
+        )
+
+    def _build_selection_card_text(self, title, detail, number, number_label, left, tags,
+                                   title_color="white"):
+        # Text column ends before the number column centred on x=930.
+        width = 840 - left
+        text = dict(shadow=SELECTION_CARD_SHADOW_ALPHA, tags=tags)
+        self._selection_text(title, 38, left, 1196, max_width=width, color=title_color, anchor="nw", **text)
+        self._selection_text(detail, 26, left, 1262, max_width=width, anchor="nw", **text)
+        self._selection_text(number, 92, 930, 1230, max_width=150, **text)
+        self._selection_text(number_label, 21, 930, 1305, max_width=150, **text)
 
     def _create_selection_sweep(self):
         if self.selection_sweep_item is not None:

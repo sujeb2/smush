@@ -597,7 +597,6 @@ class ModernGLUIFramework:
         self.root.mainloop()
 
     def poll_input(self):
-        """Hook for hardware input, serviced before simulation and rendering."""
         pass
 
     def close(self):

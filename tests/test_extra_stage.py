@@ -68,7 +68,7 @@ class ExtraStageTests(unittest.TestCase):
 
     def test_extra_stage_difficulty_keeps_template(self):
         chart = SimpleNamespace(title="AA")
-        game = self.game(scene="select", song_groups=[[chart]], song_index=0,
+        game = self.game(scene="select", song_groups=[[chart]], song_index=0, difficulty_index=0,
                          selection_heading_item=None, canvas=Mock(), _play_sfx=Mock(),
                          _refresh_selection_list=Mock(), _print=Mock(), _broadcast_selection=Mock())
         game.extra_stage_active = True

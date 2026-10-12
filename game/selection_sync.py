@@ -36,7 +36,6 @@ def read_selection(path):
 
 
 def write_json(path, data, attempts=20):
-    """Atomically replace a shared file; Windows refuses while the other process is reading it."""
     temporary = f"{path}.{os.getpid()}.tmp"
     with open(temporary, "w", encoding="utf-8") as stream:
         json.dump(data, stream)
@@ -61,7 +60,6 @@ def shared_lock(path):
 
 
 def publish_selection(path, state, *, initial=False):
-    """Write one revision; once a chart is confirmed, later choices cannot replace it."""
     with shared_lock(path):
         previous = read_selection(path)
         same_stage = previous is not None and previous.get("stage") == state["stage"]

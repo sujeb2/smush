@@ -11,6 +11,7 @@ from game.selection_sync import read_selection
 from game.AnimationFramework import MinigameAnimationMixin
 from game.scenes import MinigameGameSceneMixin
 from game.AssetWorker import IMAGE_PATHS
+from game.rules import SongFolder
 
 
 class EntryStation(MinigameFlowMixin):
@@ -35,6 +36,8 @@ class SelectionStation(EntryStation):
         self.track_index = 0
         self.song_index = 0
         self.difficulty_index = 0
+        self.folder_index = 0
+        self.folder_cursor = 1
         self.selection_phase = "song"
         self.track = charts[0][0]
         self.rebuilt = 0
@@ -46,6 +49,9 @@ class SelectionStation(EntryStation):
 
     def _build_scene(self):
         self.rebuilt += 1
+
+    def _song_folders(self):
+        return (SongFolder("ALL", "artist", None, tuple(range(len(self.song_groups)))),)
 
     def _start_selection_wheel(self, direction):
         self.wheel_turns += direction
@@ -227,11 +233,11 @@ class TwoPlayerEntryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as session_dir:
             first = SelectionStation(session_dir, 1, charts)
             second = SelectionStation(session_dir, 2, charts)
-            first.song_index, first.track = 1, charts[1][0]
+            first.song_index, first.folder_cursor, first.track = 1, 2, charts[1][0]
             first._broadcast_selection("select")
             second._poll_shared_selection()
             self.assertEqual((second.wheel_turns, second._build_scene.call_count), (1, 0))
-            first.song_index, first.track = 4, charts[4][0]
+            first.song_index, first.folder_cursor, first.track = 4, 5, charts[4][0]
             first._broadcast_selection("select")
             second._poll_shared_selection()
             self.assertEqual((second.wheel_turns, second._build_scene.call_count), (1, 1))

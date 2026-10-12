@@ -136,7 +136,7 @@ class SettingsTests(unittest.TestCase):
         game = settings_game()
         game._cycle_selection = Mock()
         game._confirm_song = Mock()
-        game.selection_phase = "song"
+        game.selection_phase, game.folder_cursor = "song", 1
         game.entry_title_fade_started = game.title_entry_morph_started = game.mode_morph_in_started = None
         game._consume_serial("BTN1\nBTN2\nForwarded\n")
         game._cycle_selection.assert_called_once()

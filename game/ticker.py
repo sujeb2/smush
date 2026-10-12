@@ -1,25 +1,40 @@
-"""IIDX-style 7-segment ticker text for the board IO display."""
+import configparser
+import os
 import threading
 import time
 
 MAX_LENGTH = 48
-RESEND_SECONDS = 5.0
-DIGITS = 4
-STEP_SECONDS = 0.28  # Keep in step with boardio.ino TICKER_STEP_MS / TICKER_BLINK_MS.
-BLINK_SECONDS = 0.5
-# Segments (bit 0 = A ... bit 6 = G) for ASCII 0x20-0x5F, identical to boardio.ino TICKER_FONT.
+RESEND_SECONDS = 2.0
+WIDTH = 32
+GLYPH_WIDTH = 5
+GLYPH_PITCH = GLYPH_WIDTH + 1
+STEP_MS = 35  # Keep in step with ticker.ino TICKER_STEP_MS / TICKER_BLINK_MS.
+BLINK_MS = 500
+# 5x7 columns (bit 0 = top row) for ASCII 0x20-0x5F, identical to ticker.ino TICKER_FONT.
 FONT = (
-    0x00, 0x0A, 0x22, 0x00, 0x6D, 0x00, 0x00, 0x02, 0x39, 0x0F, 0x63, 0x40, 0x04, 0x40, 0x08, 0x52,
-    0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F, 0x09, 0x00, 0x58, 0x48, 0x4C, 0x53,
-    0x7B, 0x77, 0x7C, 0x39, 0x5E, 0x79, 0x71, 0x3D, 0x76, 0x30, 0x1E, 0x75, 0x38, 0x37, 0x54, 0x3F,
-    0x73, 0x67, 0x50, 0x6D, 0x78, 0x3E, 0x1C, 0x2A, 0x76, 0x6E, 0x5B, 0x39, 0x64, 0x0F, 0x23, 0x08,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x5F, 0x00, 0x00, 0x00, 0x07, 0x00, 0x07, 0x00, 0x14, 0x7F, 0x14, 0x7F, 0x14,
+    0x24, 0x2A, 0x7F, 0x2A, 0x12, 0x23, 0x13, 0x08, 0x64, 0x62, 0x36, 0x49, 0x55, 0x22, 0x50, 0x00, 0x05, 0x03, 0x00, 0x00,
+    0x00, 0x1C, 0x22, 0x41, 0x00, 0x00, 0x41, 0x22, 0x1C, 0x00, 0x08, 0x2A, 0x1C, 0x2A, 0x08, 0x08, 0x08, 0x3E, 0x08, 0x08,
+    0x00, 0x50, 0x30, 0x00, 0x00, 0x08, 0x08, 0x08, 0x08, 0x08, 0x00, 0x60, 0x60, 0x00, 0x00, 0x20, 0x10, 0x08, 0x04, 0x02,
+    0x3E, 0x51, 0x49, 0x45, 0x3E, 0x00, 0x42, 0x7F, 0x40, 0x00, 0x42, 0x61, 0x51, 0x49, 0x46, 0x21, 0x41, 0x45, 0x4B, 0x31,
+    0x18, 0x14, 0x12, 0x7F, 0x10, 0x27, 0x45, 0x45, 0x45, 0x39, 0x3C, 0x4A, 0x49, 0x49, 0x30, 0x01, 0x71, 0x09, 0x05, 0x03,
+    0x36, 0x49, 0x49, 0x49, 0x36, 0x06, 0x49, 0x49, 0x29, 0x1E, 0x00, 0x36, 0x36, 0x00, 0x00, 0x00, 0x56, 0x36, 0x00, 0x00,
+    0x08, 0x14, 0x22, 0x41, 0x00, 0x14, 0x14, 0x14, 0x14, 0x14, 0x00, 0x41, 0x22, 0x14, 0x08, 0x02, 0x01, 0x51, 0x09, 0x06,
+    0x32, 0x49, 0x79, 0x41, 0x3E, 0x7E, 0x11, 0x11, 0x11, 0x7E, 0x7F, 0x49, 0x49, 0x49, 0x36, 0x3E, 0x41, 0x41, 0x41, 0x22,
+    0x7F, 0x41, 0x41, 0x22, 0x1C, 0x7F, 0x49, 0x49, 0x49, 0x41, 0x7F, 0x09, 0x09, 0x01, 0x01, 0x3E, 0x41, 0x41, 0x51, 0x32,
+    0x7F, 0x08, 0x08, 0x08, 0x7F, 0x00, 0x41, 0x7F, 0x41, 0x00, 0x20, 0x40, 0x41, 0x3F, 0x01, 0x7F, 0x08, 0x14, 0x22, 0x41,
+    0x7F, 0x40, 0x40, 0x40, 0x40, 0x7F, 0x02, 0x04, 0x02, 0x7F, 0x7F, 0x04, 0x08, 0x10, 0x7F, 0x3E, 0x41, 0x41, 0x41, 0x3E,
+    0x7F, 0x09, 0x09, 0x09, 0x06, 0x3E, 0x41, 0x51, 0x21, 0x5E, 0x7F, 0x09, 0x19, 0x29, 0x46, 0x46, 0x49, 0x49, 0x49, 0x31,
+    0x01, 0x01, 0x7F, 0x01, 0x01, 0x3F, 0x40, 0x40, 0x40, 0x3F, 0x1F, 0x20, 0x40, 0x20, 0x1F, 0x7F, 0x20, 0x18, 0x20, 0x7F,
+    0x63, 0x14, 0x08, 0x14, 0x63, 0x03, 0x04, 0x78, 0x04, 0x03, 0x61, 0x51, 0x49, 0x45, 0x43, 0x00, 0x7F, 0x41, 0x41, 0x00,
+    0x02, 0x04, 0x08, 0x10, 0x20, 0x00, 0x41, 0x41, 0x7F, 0x00, 0x04, 0x02, 0x01, 0x02, 0x04, 0x40, 0x40, 0x40, 0x40, 0x40,
 )
 SCENE_TEXT = {
     "title": "WELCOME TO SMUSH CiTRADE",
     "ci": "WELCOME TO SMUSH CiTRADE",
-    "demonstration": "WELCOME TO SMUSH",
+    "demonstration": "DEMO PLAY",
     "entry": "ENTRY",
-    "warning": "ENTRY",
+    "warning": "WARNING",
     "mode_select": "MODE SELECT",
     "title_select": "MUSIC SELECT",
     "total_result": "TOTAL RESULT",
@@ -42,7 +57,6 @@ def song_label(track):
 
 
 def ticker_message(app):
-    """Return (text, blink) for the current scene."""
     scene = app.scene
     track = getattr(app, "track", None)
     if getattr(app, "unrecoverable_error", None):
@@ -68,53 +82,47 @@ def ticker_message(app):
     return "", False
 
 
-def glyph(character):
-    code = ord(character.upper()) if len(character) == 1 else 0
-    return FONT[code - 0x20] if 0x20 <= code <= 0x5F else 0
+def text_column(text, x):
+    if x < 0 or x >= len(text) * GLYPH_PITCH - 1 or x % GLYPH_PITCH == GLYPH_WIDTH:
+        return 0
+    code = ord(text[x // GLYPH_PITCH].upper())
+    return FONT[(code - 0x20) * GLYPH_WIDTH + x % GLYPH_PITCH] if 0x20 <= code <= 0x5F else 0
 
 
 def ticker_frame(text, blink, elapsed):
-    """Segment bytes the board shows `elapsed` seconds after receiving the text."""
-    frame = [0] * DIGITS
-    if len(text) > DIGITS:
-        offset = int(elapsed / STEP_SECONDS) % (len(text) + DIGITS)
-        for digit in range(DIGITS):
-            index = offset + digit - DIGITS
-            if 0 <= index < len(text):
-                frame[digit] = glyph(text[index])
-    elif not blink or int(elapsed / BLINK_SECONDS) % 2 == 0:
-        start = (DIGITS - len(text)) // 2
-        for index, character in enumerate(text):
-            frame[start + index] = glyph(character)
-    return tuple(frame)
+    width = len(text) * GLYPH_PITCH - 1
+    elapsed_ms = round(elapsed * 1000)  # The firmware counts whole milliseconds.
+    if width > WIDTH:
+        offset = elapsed_ms // STEP_MS % (width + WIDTH)
+        return tuple(text_column(text, x + offset - WIDTH) for x in range(WIDTH))
+    if blink and elapsed_ms // BLINK_MS % 2:
+        return (0,) * WIDTH
+    start = (WIDTH - width) // 2
+    return tuple(text_column(text, x - start) for x in range(WIDTH))
 
 
 def render_preview(frame):
     from PIL import Image, ImageDraw
 
-    lit, unlit = (255, 48, 32, 255), (52, 12, 10, 255)
-    image = Image.new("RGBA", (480, 170), (8, 8, 8, 255))
+    lit, unlit = (255, 48, 32, 255), (40, 10, 8, 255)
+    image = Image.new("RGBA", (480, 150), (8, 8, 8, 255))
     draw = ImageDraw.Draw(image)
-    width, height, thick = 72, 120, 12
-    half = thick / 2
-
-    def horizontal(x, y):
-        return ((x + half, y), (x + thick, y - half), (x + width - thick, y - half),
-                (x + width - half, y), (x + width - thick, y + half), (x + thick, y + half))
-
-    def vertical(x, y):
-        return ((x, y + half), (x + half, y + thick), (x + half, y + height / 2 - thick),
-                (x, y + height / 2 - half), (x - half, y + height / 2 - thick), (x - half, y + thick))
-
-    for digit, segments in enumerate(frame):
-        x, y = 48 + digit * 108, 14
-        shapes = (horizontal(x, y), vertical(x + width, y), vertical(x + width, y + height / 2),
-                  horizontal(x, y + height), vertical(x, y + height / 2), vertical(x, y),
-                  horizontal(x, y + height / 2))
-        for bit, shape in enumerate(shapes):
-            draw.polygon(shape, fill=lit if segments >> bit & 1 else unlit)
-    draw.text((12, 150), "TICKER", fill="white")
+    for x, column in enumerate(frame):
+        left = 16 + x * 13 + x // 8 * 8
+        for row in range(8):
+            top = 14 + row * 13
+            draw.ellipse((left, top, left + 10, top + 10), fill=lit if column >> row & 1 else unlit)
+    draw.text((16, 128), "TICKER", fill="white")
     return image
+
+
+def ticker_port(config_path):
+    port = os.environ.get("SMUSH_TICKER_PORT")
+    if port is None:
+        parser = configparser.ConfigParser()
+        parser.read(config_path, encoding="utf-8")
+        port = parser.get("SERIAL", "TickerPort", fallback="")
+    return port.strip()
 
 
 class TickerOutput:
@@ -159,12 +167,29 @@ class TickerOutput:
 
 
 class TickerRuntimeMixin:
-    def _initialize_ticker(self):
+    def _initialize_ticker(self, config_path):
         self.ticker_output = None
+        self.ticker_serial = None
         self.ticker_message = None
         self.ticker_started = time.monotonic()
         self.ticker_preview_frame = None
+        port = ticker_port(config_path)
+        # One ticker per cabinet: in 2-player mode station 1 drives it.
+        if port and not self.demo_mode and getattr(self, "station", 1) == 1:
+            threading.Thread(target=self._connect_ticker, args=(config_path, port),
+                             daemon=True, name="smush-ticker-serial").start()
         self.root.after(0, self._tick_ticker)
+
+    def _connect_ticker(self, config_path, port):
+        from serial_arduino import SerialIO
+
+        parser = configparser.ConfigParser()
+        parser.read(config_path, encoding="utf-8")
+        try:
+            self.ticker_serial = SerialIO(port, parser.getint("SERIAL", "SerialBaudrate", fallback=9600),
+                                          parser.getint("SERIAL", "SerialTimeout", fallback=1))
+        except Exception as error:
+            self._print(f"ticker unavailable on {port}: {error}")
 
     def _tick_ticker(self):
         if not self.running:
@@ -174,15 +199,15 @@ class TickerRuntimeMixin:
         now = time.monotonic()
         if message != self.ticker_message:  # Like the firmware, a resend keeps the scroll position.
             self.ticker_message, self.ticker_started = message, now
-        if not self.demo_mode and self.serial is not None:
+        if self.ticker_serial is not None:
             if self.ticker_output is None:
                 self.ticker_output = TickerOutput(self._print)
-            self.ticker_output.submit(self.serial, message)
+            self.ticker_output.submit(self.ticker_serial, message)
         self._draw_ticker_preview(now)
         if self.unrecoverable_error:
             self._close_ticker()  # err blink
             return
-        self.root.after(40, self._tick_ticker)
+        self.root.after(35, self._tick_ticker)
 
     def _draw_ticker_preview(self, now):
         # Shares the F6 toggle with the demo-mode LED preview.
@@ -203,3 +228,6 @@ class TickerRuntimeMixin:
         if getattr(self, "ticker_output", None) is not None:
             self.ticker_output.close()
             self.ticker_output = None
+        if getattr(self, "ticker_serial", None) is not None and not self.running:
+            self.ticker_serial.close()
+            self.ticker_serial = None

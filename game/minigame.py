@@ -108,7 +108,7 @@ class MinigameUI(
             self.credit_count += earned
         self._initialize_state()
         self._initialize_leds(config_path, demo_mode)
-        self._initialize_ticker()
+        self._initialize_ticker(config_path)
         self.recovery_startup = previous_error_details(self.base) is not None
         self.audio = AudioPlayer()
         self.root.bind("<KeyPress>", self._handle_key)
@@ -187,7 +187,6 @@ MINIGAME_PROCESS_FLAG = "--minigame-process"
 
 
 def minigame_command(*arguments):
-    """Command that runs run_demo() in a new process, from source or a frozen build."""
     if "__compiled__" in globals() or getattr(sys, "frozen", False):
         # A frozen executable cannot run `-m`; main.py routes this flag to run_demo().
         return [sys.executable, MINIGAME_PROCESS_FLAG, *arguments]

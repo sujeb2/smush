@@ -39,7 +39,8 @@ def select_game(song_count=6):
     game.track_index, game.coins_per_credit, game.coin_count, game.credit_count = 0, 0, 0, 0
     game.two_player = False
     MinigameStateMixin._initialize_state(game)
-    game.scene, game.selection_phase = "select", "song"
+    # One LEVEL folder holds every song; slot 0 is its own card.
+    game.scene, game.selection_phase, game.folder_cursor = "select", "song", 1
     game.select_deadline = time.monotonic() + 60
     game._play_sfx = game._print = Mock()
     game._schedule_select_preview = Mock()
@@ -49,7 +50,6 @@ def select_game(song_count=6):
 
 
 def preview_labels(game):
-    """(x, y, opacity, squash) of each neighbour label, in stacking order."""
     return [
         (*map(round, game.canvas.items[label].coords), game.canvas.items[label].opacity,
          game.canvas.items[label].scale_y)
@@ -151,11 +151,11 @@ class SelectionWheelTurnTests(unittest.TestCase):
         self.assertIn((950, 925), labels)
 
     def test_short_lists_without_an_overlapping_card_keep_names_centred(self):
-        game = select_game(song_count=4)
+        game = select_game(song_count=3)  # Folder card plus 3 songs.
         self.assertIn((850, 1000), {(x, y) for x, y, _, _ in preview_labels(game)})
 
     def test_two_song_list_still_turns_without_duplicate_cards(self):
-        game = select_game(song_count=2)
+        game = select_game(song_count=1)  # Folder card plus 1 song.
         game._cycle_selection()
         labels = [label for _, label, _, _ in game.selection_preview_items]
         self.assertEqual(len(labels), 2)

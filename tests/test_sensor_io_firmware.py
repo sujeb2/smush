@@ -1,4 +1,3 @@
-"""Exercise sensor firmware timing with host-side Arduino/library stubs."""
 import pathlib
 import shutil
 import subprocess

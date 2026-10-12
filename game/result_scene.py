@@ -131,7 +131,6 @@ class MinigameResultSceneMixin:
         self._image("result_down_button", 540, 1845, tags=("game_ended",))
 
     def _extra_challenge_band_source(self):
-        """Dark information band in the HOW TO PLAY style, with the BT1/BT2 chips of music select."""
         if "extra_challenge_band" in self.sources:
             return self.sources["extra_challenge_band"]
         width, height = DESIGN_WIDTH, EXTRA_CHALLENGE_BAND_HEIGHT

@@ -10,7 +10,6 @@ def hex_to_rgb(color):
 
 
 def blend(color, background, amount):
-    """Mixes color toward background; amount 0 keeps color, 1 is background."""
     source, target = hex_to_rgb(color), hex_to_rgb(background)
     return "#" + "".join(f"{round(s + (t - s) * amount):02x}" for s, t in zip(source, target))
 
@@ -37,13 +36,6 @@ class Particle:
 
 
 class ParticleSystem:
-    """Streak particles in design coordinates, drawn as round-capped canvas lines.
-
-    Tk has no alpha for vector items, so particles fade by blending toward the
-    background color; colors are quantized so itemconfigure runs only a few times
-    per particle instead of every frame.
-    """
-
     def __init__(self, ui, background, tag, below=None):
         self.ui = ui
         self.background = background
@@ -130,8 +122,6 @@ class ParticleSystem:
 
 
 class Fireworks:
-    """Rockets rise out of the bin, then burst into drag-slowed, twinkling sparks."""
-
     COLORS = (("#ffffff", "#ffbd2e"), ("#ff5f56", "#ffd1cc"), ("#27c7f7", "#ffffff"),
               ("#246bec", "#9fd3ff"), ("#f57c18", "#ffe08a"), ("#28c68d", "#d5ffe9"))
 

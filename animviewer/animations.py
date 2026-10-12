@@ -318,7 +318,7 @@ class PreviewRenderer:
         surface.blit(layer, playfield)
         lane_width = playfield.width / lanes
         start_y = playfield.top + round((505 - 470) / 1450 * playfield.height)
-        production_hit_y = 1850 if lanes == 4 else 1560
+        production_hit_y = 1810 if lanes == 4 else 1520
         judgement_y = playfield.top + round((production_hit_y - 470) / 1450 * playfield.height)
         line_name = "line_4k" if lanes == 4 else "line"
         line = self.assets.scaled(line_name, (playfield.width, max(4, round(33 / 1450 * playfield.height))))
@@ -345,7 +345,7 @@ class PreviewRenderer:
         layer = self.assets.fitted("main_layer", (300, area.height - 20))
         playfield = layer.get_rect(center=area.center)
         surface.blit(layer, playfield)
-        line_y = playfield.top + round((1560 - 470) / 1450 * playfield.height)
+        line_y = playfield.top + round((1520 - 470) / 1450 * playfield.height)
         line = self.assets.scaled("line", (playfield.width, max(4, round(33 / 1450 * playfield.height))))
         surface.blit(line, (playfield.left, line_y))
         frames = self.assets.sequence("lane_help_2k_0")

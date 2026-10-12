@@ -17,6 +17,7 @@ from game.rules import (
     calculate_score,
     event_result_destination,
     group_charts_by_song,
+    group_songs_into_folders,
     is_clear,
     rank_for_accuracy,
 )
@@ -143,8 +144,13 @@ class MinigameFlowMixin:
             ):
                 return
             self._finish_selection_wheel()
-            if lane == 0:
+            if self.selection_phase == "song" and self.folder_cursor == 0:
+                # Either button on the open folder's own card closes it.
+                self._close_folder()
+            elif lane == 0:
                 self._cycle_selection()
+            elif self.selection_phase == "folder":
+                self._open_folder()
             elif self.selection_phase == "song":
                 self._confirm_song()
             else:
@@ -173,10 +179,73 @@ class MinigameFlowMixin:
             self.start_game_ended_transition()
 
     def _reset_selection(self):
-        self.song_index = 0
-        self.difficulty_index = 0
+        self.folder_index = 0
+        self.folder_cursor = 1
+        self.selection_phase = "folder"
+        self._select_folder_song(0)
+
+    def _song_folders(self):
+        cached = getattr(self, "song_folder_cache", None)
+        if cached is None or cached[0] is not self.song_groups:
+            cached = (self.song_groups, group_songs_into_folders(self.song_groups))
+            self.song_folder_cache = cached
+        return cached[1]
+
+    def _current_folder(self):
+        folders = self._song_folders()
+        return folders[min(max(0, self.folder_index), len(folders) - 1)]
+
+    def _on_folder_card(self):
+        return self.selection_phase == "folder" or (self.selection_phase == "song" and self.folder_cursor == 0)
+
+    def _select_folder_song(self, position):
+        folder = self._current_folder()
+        self.song_index = folder.songs[position]
+        group = self.song_groups[self.song_index]
+        self.difficulty_index = next(
+            (index for index, chart in enumerate(group) if chart.level == folder.level), 0,
+        )
+        self.track = group[self.difficulty_index]
+
+    def _open_folder(self):
+        if getattr(self, "two_player", False):
+            self._poll_shared_selection()
+            if self.scene != "select":
+                return
+        self._play_sfx("card_show.wav")
         self.selection_phase = "song"
-        self.track = self.song_groups[0][0]
+        self.folder_cursor = 1
+        self._select_folder_song(0)
+        self._refresh_selection_list()
+        self._start_select_audio()
+        self._print(f"[ChartManager] folder opened: {self._current_folder().name}")
+        self._broadcast_selection("select")
+
+    def _close_folder(self):
+        if getattr(self, "two_player", False):
+            self._poll_shared_selection()
+            if self.scene != "select":
+                return
+        self._play_sfx("card_show.wav")
+        self.selection_phase = "folder"
+        self.folder_cursor = 1
+        self._select_folder_song(0)
+        self._refresh_selection_list()
+        self._start_select_audio()
+        self._print(f"[ChartManager] folder closed: {self._current_folder().name}")
+        self._broadcast_selection("select")
+
+    def _start_select_audio(self):
+        if self.selection_phase != "folder":
+            self._schedule_select_preview(1.0)
+            return
+        self.select_preview_started = False
+        self.select_preview_key = None
+        self._close_select_video()
+        self.audio.play_layers(
+            self._entry_layer_paths(), level=2, fade_ms=320,
+            fallback_path=os.path.join(self.bgm_root, "entry.mp3"),
+        )
 
     def _apply_game_mode(self, mode):
         charts = self.charts_by_mode[mode]
@@ -308,18 +377,25 @@ class MinigameFlowMixin:
                 return
         self._play_sfx("cursor_select.wav")
         previous_preview = self._track_preview_key(self.track)
-        if self.selection_phase == "song":
-            self.song_index = (self.song_index + 1) % len(self.song_groups)
-            self.difficulty_index = 0
-            self.track = self.song_groups[self.song_index][0]
-            self._print(f"[ChartManager] song selected: {self.track.artist} - {self.track.title}")
+        if self.selection_phase == "folder":
+            self.folder_index = (self.folder_index + 1) % len(self._song_folders())
+            self._select_folder_song(0)
+            self._print(f"[ChartManager] folder selected: {self._current_folder().name}")
+        elif self.selection_phase == "song":
+            # Slot 0 is the open folder's own card, reached again after the last song.
+            self.folder_cursor = (self.folder_cursor + 1) % (len(self._current_folder().songs) + 1)
+            if self.folder_cursor:
+                self._select_folder_song(self.folder_cursor - 1)
+                self._print(f"[ChartManager] song selected: {self.track.artist} - {self.track.title}")
+            else:
+                self._print(f"[ChartManager] folder card selected: {self._current_folder().name}")
         else:
             difficulties = self.song_groups[self.song_index]
             self.difficulty_index = (self.difficulty_index + 1) % len(difficulties)
             self.track = difficulties[self.difficulty_index]
             self._print(f"[ChartManager] difficulty selected: {self.track.difficulty}")
         self._start_selection_wheel(1)
-        if self._track_preview_key(self.track) != previous_preview:
+        if self.selection_phase != "folder" and self._track_preview_key(self.track) != previous_preview:
             self._schedule_select_preview(1.0)
         self._broadcast_selection("select")
 
@@ -330,6 +406,7 @@ class MinigameFlowMixin:
                 return
         self._play_sfx("ok.wav")
         self.selection_phase = "difficulty"
+        # Level folders still offer every difficulty, starting from the easiest.
         self.difficulty_index = 0
         self.track = self.song_groups[self.song_index][0]
         if self.selection_heading_item is not None:
@@ -350,8 +427,6 @@ class MinigameFlowMixin:
         self._build_selection_list(("select", "select_list", "select_dynamic"))
 
     def _start_selection_wheel(self, direction):
-        """Turn the music select wheel one slot: neighbours rotate along the arc while the
-        centre card flips shut on the old choice and flips open on the new one."""
         self._finish_selection_wheel()
         choices, _ = self._selection_choices()
         if getattr(self, "extra_stage_active", False) or len(choices) < 2:
@@ -560,6 +635,7 @@ class MinigameFlowMixin:
             "extra": bool(getattr(self, "extra_stage_active", False)),
             "track_index": self.track_index, "song_index": self.song_index,
             "difficulty_index": self.difficulty_index, "phase": self.selection_phase,
+            "folder_index": self.folder_index, "folder_cursor": self.folder_cursor,
             "chart_path": self.track.path,
         }
         published, wrote = publish_selection(self._selection_sync_path(), state, initial=initial)
@@ -595,7 +671,7 @@ class MinigameFlowMixin:
             return
         self._finish_selection_wheel()
         previous = (self.selection_phase, self.song_index, self.difficulty_index,
-                    bool(getattr(self, "extra_stage_active", False)))
+                    bool(getattr(self, "extra_stage_active", False)), self.folder_index, self.folder_cursor)
         extra = bool(state.get("extra"))
         if extra != bool(getattr(self, "extra_stage_active", False)):
             if extra and self.extra_charts_by_mode.get("4k"):
@@ -617,12 +693,23 @@ class MinigameFlowMixin:
         chart = self.song_groups[song][difficulty]
         if chart.path != state.get("chart_path"):
             return
+        phase = state.get("phase", "song")
+        folder_index = state.get("folder_index", self.folder_index)
+        folder_cursor = state.get("folder_cursor", self.folder_cursor)
+        if not isinstance(folder_index, int) or not isinstance(folder_cursor, int):
+            return
+        if phase in ("folder", "song"):
+            folders = self._song_folders()
+            if not 0 <= folder_index < len(folders) or not 0 <= folder_cursor <= len(folders[folder_index].songs):
+                return
         self.selection_sync_seen = marker
         self.track_index = state.get("track_index", self.track_index)
         self.song_index = song
         self.difficulty_index = difficulty
         self.track = chart
-        self.selection_phase = state.get("phase", "song")
+        self.selection_phase = phase
+        self.folder_index = folder_index
+        self.folder_cursor = folder_cursor
         if state.get("kind") == "next":
             self.applying_shared_selection = True
             try:
@@ -631,21 +718,25 @@ class MinigameFlowMixin:
                 self.applying_shared_selection = False
         elif self._is_single_selection_step(previous):
             self._start_selection_wheel(1)
-            self._schedule_select_preview(1.0)
+            if self.selection_phase != "folder":
+                self._schedule_select_preview(1.0)
         else:
             self._build_scene()
-            self._schedule_select_preview(1.0)
+            if self.selection_phase != "folder" or previous[0] != "folder":
+                self._start_select_audio()
 
     def _is_single_selection_step(self, previous):
-        """True when the rival moved the cursor exactly one slot, so this station can turn the wheel too."""
-        phase, song, difficulty, extra = previous
+        phase, song, difficulty, extra, folder, cursor = previous
         if phase != self.selection_phase or extra != bool(getattr(self, "extra_stage_active", False)):
             return False
         if getattr(self, "settings_phase", None) is not None:
             # A rebuild keeps the open settings popup above the list; a turn would draw over it.
             return False
+        if phase == "folder":
+            return self.folder_index == (folder + 1) % len(self._song_folders())
         if phase == "song":
-            return self.song_index == (song + 1) % len(self.song_groups) and self.difficulty_index == 0
+            return (self.folder_index == folder and cursor != 0
+                    and self.folder_cursor == (cursor + 1) % (len(self._current_folder().songs) + 1))
         return (self.song_index == song
                 and self.difficulty_index == (difficulty + 1) % len(self.song_groups[song]))
 
@@ -797,7 +888,11 @@ class MinigameFlowMixin:
 
     def _entry_layer_paths(self):
         # IIDX-style: ENTRY L0 -> WARNING L1 -> MODE SELECT L2 over one synced loop.
-        return [os.path.join(self.bgm_root, f"entry_l{level}.wav") for level in range(3)]
+        paths = []
+        for level in range(3):
+            stem = os.path.join(self.bgm_root, f"entry_l{level}")
+            paths.append(next((stem + ext for ext in (".mp3", ".wav") if os.path.isfile(stem + ext)), stem + ".mp3"))
+        return paths
 
     def _start_entry_title_transition(self):
         if self.scene != "entry" or self.entry_title_fade_started is not None:
@@ -846,7 +941,7 @@ class MinigameFlowMixin:
         self._build_scene()
         self.scene_started = time.monotonic()
         self.select_deadline = self.scene_started + duration
-        self._schedule_select_preview(1.0)
+        self._start_select_audio()
         self.root.after(140, lambda: self._play_sfx("card_show.wav") if self.scene == "select" else None)
         self._print(f"music select visible, songs: {len(self.song_groups)}, track: {self._track_key()}")
         self._broadcast_selection("select", initial=True)
@@ -1350,7 +1445,6 @@ class MinigameFlowMixin:
             self._print(f"[FlowSync] result publish failed: {error}")
 
     def _joint_result(self):
-        """(cleared, extra available) for the pair: playing on as long as anyone in play cleared."""
         stage = self._flow_stage("result")
         stations = ((self._entry_controller_station(),) if getattr(self, "solo_active", False) else (1, 2))
         results = [

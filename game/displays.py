@@ -1,5 +1,3 @@
-"""Discover monitor bounds in desktop coordinates without an extra dependency on macOS."""
-
 import ctypes
 import sys
 from ctypes.util import find_library
@@ -18,7 +16,6 @@ class _Rect(ctypes.Structure):
 
 
 def connected_monitors():
-    """Return (x, y, width, height) for each connected monitor."""
     if sys.platform == "darwin":
         framework = find_library("CoreGraphics")
         if framework:
@@ -45,7 +42,6 @@ def connected_monitors():
 
 
 def station_geometries(monitors, windowed=False):
-    """Place two portrait stations on separate monitors or beside each other."""
     monitors = sorted(monitors, key=lambda monitor: (monitor[0], monitor[1]))
     if not monitors:
         raise ValueError("No connected monitor was found.")

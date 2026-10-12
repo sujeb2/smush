@@ -47,9 +47,6 @@ weights=[
 ]
 
 class LatestFrameReader:
-    """Reads the camera on its own thread so inference always gets the newest frame
-    instead of one that queued up in the driver buffer while the previous frame ran."""
-
     def __init__(self, capture, timeout=5.0):
         self.capture = capture
         self.timeout = timeout
