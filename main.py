@@ -293,6 +293,8 @@ class Main:
                     return
                 self.ui.post_serial(self.serial)
                 status("Arduino connected.")
+                if self._attach_sorter():
+                    status("Sorter connected.")
             status("Checking webcam connection...")
             webcam_error = self._check_webcam()
             if webcam_error is not None:
@@ -329,6 +331,22 @@ class Main:
             if self.ui.running:
                 self.ui.post_error("RUNTIME_FAILURE", str(error))
 
+    def _attach_sorter(self):
+        # The can/plastic sorter Nano is optional; without it crushed items just fall unsorted.
+        port = config.get("SERIAL", "SorterPort", fallback="").strip()
+        if not port:
+            return False
+        try:
+            sorter = SerialIO(port, config["SERIAL"]["SerialBaudrate"], timeout=config["SERIAL"].getint("SerialTimeout"))
+        except Exception as error:
+            print(f"[{self.timestamp}] [main] sorter unavailable on {port}: {error}")
+            return False
+        self.serial.attach_sorter(sorter, {
+            1: config.get("SERIAL", "SorterObject1", fallback="CAN"),
+            2: config.get("SERIAL", "SorterObject2", fallback="PLASTIC"),
+        })
+        return True
+
     def _check_webcam(self):
         camera = None
         try:
@@ -363,6 +381,7 @@ class Main:
                     config["SERIAL"]["SerialBaudrate"],
                     timeout=config["SERIAL"].getint("SerialTimeout"),
                 )
+                self._attach_sorter()
             import model
 
             self.model = model.Model(config["GENERIC"]["ModelPath"], serial=self.serial)

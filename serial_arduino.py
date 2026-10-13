@@ -16,6 +16,9 @@ class SerialIO:
         self.status_buffer = ""
         self.crushing_busy = False
         self.crushing_generation = 0
+        self.sorter = None
+        self.sorter_kinds = {}
+        self.pending_sort = None
         self.ser = serial.Serial(port, baudrate, timeout=timeout, write_timeout=0.2)
         print(f"[{self.timestamp}] [SerialIO] Serial port init done: {port} at {baudrate} baudrate.")
 
@@ -58,17 +61,41 @@ class SerialIO:
         self.status_buffer += message.lower()
         while True:
             matches = [(self.status_buffer.find(command), command)
-                       for command in ("crushing_busy", "crushing_idle", "crushing_done")
+                       for command in ("crushing_busy", "crushing_idle", "crushing_done",
+                                       "obj_dropped1", "obj_dropped2", "resetting")
                        if command in self.status_buffer]
             if not matches:
                 break
             position, command = min(matches)
+            self.status_buffer = self.status_buffer[position + len(command):]
+            if command.startswith("obj_dropped"):
+                self.pending_sort = self.sorter_kinds.get(int(command[-1]))
+                continue
+            if command == "resetting":
+                self.pending_sort = None
+                continue
+            if command == "crushing_done":
+                self._run_sorter()
             busy = command == "crushing_busy"
             if busy != self.crushing_busy:
                 self.crushing_generation += 1
             self.crushing_busy = busy
-            self.status_buffer = self.status_buffer[position + len(command):]
         self.status_buffer = self.status_buffer[-256:]
+
+    def attach_sorter(self, sorter, kinds):
+        # kinds maps the crusher's obj_dropped<index> to a sorter side, e.g. {1: "CAN", 2: "PLASTIC"}.
+        self.sorter = sorter
+        self.sorter_kinds = kinds
+
+    def _run_sorter(self):
+        # crushing_done arrives once the crusher has retracted, so the crushed item is ready to sort.
+        kind, self.pending_sort = self.pending_sort, None
+        if kind is None or self.sorter is None:
+            return
+        try:
+            self.sorter.sort_object(kind)
+        except Exception as error:
+            print(f"[{self.timestamp}] [SerialIO] sorter write failed: {error}")
 
     def poll_machine_status(self):
         # Preserve data for the UI even when the recognition worker reads first.
@@ -100,6 +127,13 @@ class SerialIO:
         if len(text) > 48 or any(not " " <= c <= "~" for c in text):
             raise ValueError("ticker text must be at most 48 printable ASCII characters")
         self.write_command(f"TICK:{'B' if blink else 'S'}:{text}")
+
+    def sort_object(self, kind):
+        # Sorter Nano gate (hardware/arduino/sorter); replies SORT_DONE:<side> when back at center.
+        kind = str(kind).strip().upper()
+        if kind not in ("CAN", "PLASTIC", "HOME"):
+            raise ValueError("sorter target must be CAN, PLASTIC or HOME")
+        self.write_command(f"SORT:{kind}")
 
     @property
     def is_open(self):
