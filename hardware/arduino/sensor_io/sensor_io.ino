@@ -20,8 +20,8 @@ void disableWatchdogOnBoot() {
 #define CONV_HALF_STEP true
 #define CONV_START_STEPS_PER_SECOND 50UL
 #define CONV_RAMP_MS 1000UL
-#define CONV_REVERSE true
-#define CONV_FORWARD_FOR 6500UL
+#define CONV_REVERSE false
+#define CONV_FORWARD_FOR 1000UL
 
 #if CONV_STEPS_PER_SECOND == 0 || CONV_STEPS_PER_SECOND > 500000UL || CONV_START_STEPS_PER_SECOND == 0 || CONV_START_STEPS_PER_SECOND > 500000UL
 #error "Target and startup rates must be between 1 and 500000 full steps/s."
@@ -33,7 +33,7 @@ const unsigned long CONV_SUBSTEPS = CONV_HALF_STEP ? 2UL : 1UL;
 #define MOTOR_STEP_B 3
 #define MOTOR_PWM 5
 #define MOTOR_SPEED 255
-#define MOTOR_RUNNING_FOR 13000UL
+#define MOTOR_RUNNING_FOR 20000UL
 #define MOTOR_RESET_TIME 3000UL
 #define MOTOR_BRAKE_FOR 150UL
 #define PHASE_REPORT_EVERY 1000UL
@@ -96,8 +96,8 @@ void sendDebugMessage(const char *message, bool newline) {
 
 unsigned long pressStartTime = 0;
 unsigned long singlePressStartTime = 0;
-const unsigned long requiredPressTime = 10000;
-const unsigned long singlePressDelay = 120;
+const unsigned long requiredPressTime = 15000;
+const unsigned long singlePressDelay = 100;
 bool buttonPressed = false;
 bool resetSent = false;
 bool conveyorRunning = false;
