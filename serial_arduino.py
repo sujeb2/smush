@@ -1,5 +1,6 @@
 import serial
 import threading
+import time
 from collections import deque
 from datetime import datetime
 
@@ -29,6 +30,19 @@ class SerialIO:
     def close(self):
         if self.ser.is_open:
             self.ser.close()
+
+    def reopen(self):
+        # Recover after the USB device dropped out and came back under the same port name.
+        self.close()
+        self.ser.open()
+
+    def reset_board(self):
+        # Pulse DTR: the Arduino's auto-reset circuit reboots the board, crashed or not.
+        with self.write_lock:
+            self.ser.dtr = False
+            time.sleep(0.1)
+            self.ser.dtr = True
+        print(f'[{self.timestamp}] [SerialIO] board reset: {self.port}')
 
     def write(self, data):
         if self.ser.is_open and data is not None:

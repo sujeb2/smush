@@ -1,19 +1,29 @@
+#include <avr/wdt.h>
+// Clear a watchdog reset early so the board cannot get stuck rebooting.
+void disableWatchdogOnBoot() __attribute__((used, naked, section(".init3")));
+void disableWatchdogOnBoot() {
+  MCUSR = 0;
+  wdt_disable();
+}
+
 const byte MATRIX_COUNT = 4;
 const byte MATRIX_PINS[MATRIX_COUNT][3] = {
   {2, 3, 4},
   {5, 6, 7},
+  {8, 9, 10},
   {11, 12, 13},
-  {10, 9, 8},
 };
-const byte MATRIX_ROTATION = 1;
-const bool MATRIX_MIRROR = false; 
-const byte MATRIX_BIT_DELAY_US = 5; 
+// Per module, in MATRIX_PINS order. Send TICK:CAL to check: each module shows its number upright,
+// with a dot in its top-left corner.
+const byte MATRIX_ROTATION[MATRIX_COUNT] = {1, 1, 1, 1}; // Quarter turns clockwise.
+const bool MATRIX_MIRROR[MATRIX_COUNT] = {false, false, false, false};
+const byte MATRIX_BIT_DELAY_US = 1; // Raise if a module shows stray dots on long wires.
 const byte MATRIX_INTENSITY = 2;
 const byte TICKER_WIDTH = MATRIX_COUNT * 8;
 const byte GLYPH_WIDTH = 5;
 const byte GLYPH_PITCH = GLYPH_WIDTH + 1;
-const unsigned long TICKER_STEP_MS = 10;
-const unsigned long TICKER_BLINK_MS = 50;
+const unsigned long TICKER_STEP_MS = 50;
+const unsigned long TICKER_BLINK_MS = 500;
 const unsigned long SERIAL_BAUD = 9600;
 const unsigned long POWER_SETTLE_MS = 250;
 const unsigned long MATRIX_REFRESH_MS = 1000;
@@ -48,6 +58,9 @@ const uint8_t TICKER_FONT[64 * GLYPH_WIDTH] PROGMEM = {
 char tickerText[49] = "";
 int tickerWidth = -1;
 bool tickerBlink = false;
+bool calibrating = false;
+volatile uint8_t *pinPort[MATRIX_COUNT][3];
+uint8_t pinMask[MATRIX_COUNT][3];
 unsigned long matrixRefreshedAt = 0;
 unsigned long rowsRefreshedAt = 0;
 byte refreshModule = 0;
@@ -57,25 +70,31 @@ char serialCommand[64];
 byte serialCommandLength = 0;
 bool discardCommand = false;
 
-void matrixShift(byte din, byte clk, byte value) {
+// Direct port writes: a full redraw takes ~3 ms instead of ~20 ms with digitalWrite.
+void setPin(byte module, byte pin, bool high) {
+  if (high) *pinPort[module][pin] |= pinMask[module][pin];
+  else *pinPort[module][pin] &= ~pinMask[module][pin];
+}
+
+void matrixShift(byte module, byte value) {
   for (byte bit = 0x80; bit; bit >>= 1) {
-    digitalWrite(din, value & bit ? HIGH : LOW);
+    setPin(module, 2, value & bit);
     delayMicroseconds(MATRIX_BIT_DELAY_US);
-    digitalWrite(clk, HIGH);
+    setPin(module, 0, true);
     delayMicroseconds(MATRIX_BIT_DELAY_US);
-    digitalWrite(clk, LOW);
+    setPin(module, 0, false);
   }
 }
 
 void matrixWrite(byte module, byte address, byte value) {
-  const byte clk = MATRIX_PINS[module][0], cs = MATRIX_PINS[module][1], din = MATRIX_PINS[module][2];
-  digitalWrite(cs, LOW);
-  matrixShift(din, clk, address);
-  matrixShift(din, clk, value);
+  setPin(module, 1, false);
+  matrixShift(module, address);
+  matrixShift(module, value);
   delayMicroseconds(MATRIX_BIT_DELAY_US);
-  digitalWrite(cs, HIGH);
-  matrixShift(din, clk, MAX7219_NOOP);
-  matrixShift(din, clk, 0);
+  setPin(module, 1, true);
+  // The MAX7219 keeps shifting while CS is high; park a no-op so a noise pulse on CS latches nothing.
+  matrixShift(module, MAX7219_NOOP);
+  matrixShift(module, 0);
 }
 
 uint8_t textColumn(int x) {
@@ -87,6 +106,10 @@ uint8_t textColumn(int x) {
 }
 
 void setTicker(const char *text, bool blink) {
+  if (calibrating) {
+    calibrating = false;
+    tickerText[0] = '\0'; // Force the new text to be shown.
+  }
   if (blink == tickerBlink && strcmp(text, tickerText) == 0) return;
   strncpy(tickerText, text, sizeof(tickerText) - 1);
   tickerText[sizeof(tickerText) - 1] = '\0';
@@ -98,7 +121,14 @@ void setTicker(const char *text, bool blink) {
 void updateTicker(unsigned long now) {
   uint8_t columns[TICKER_WIDTH] = {};
   const unsigned long elapsed = now - tickerStartedAt;
-  if (tickerWidth > TICKER_WIDTH) {
+  if (calibrating) {
+    for (byte module = 0; module < MATRIX_COUNT; ++module) {
+      columns[module * 8] = 0x01; // Top-left corner dot.
+      for (byte x = 0; x < GLYPH_WIDTH; ++x) {
+        columns[module * 8 + 2 + x] = pgm_read_byte(TICKER_FONT + ('1' + module - 0x20) * GLYPH_WIDTH + x) << 1;
+      }
+    }
+  } else if (tickerWidth > TICKER_WIDTH) {
     const int offset = (elapsed / TICKER_STEP_MS) % (tickerWidth + TICKER_WIDTH);
     for (byte x = 0; x < TICKER_WIDTH; ++x) columns[x] = textColumn(x + offset - TICKER_WIDTH);
   } else if (!tickerBlink || (elapsed / TICKER_BLINK_MS) % 2 == 0) {
@@ -110,12 +140,12 @@ void updateTicker(unsigned long now) {
       byte value = 0;
       for (byte bit = 0; bit < 8; ++bit) {
         byte row = digit, column = 7 - bit;
-        for (byte turn = 0; turn < MATRIX_ROTATION % 4; ++turn) {
+        for (byte turn = 0; turn < MATRIX_ROTATION[module] % 4; ++turn) {
           const byte previous = row;
           row = column;
           column = 7 - previous;
         }
-        if (MATRIX_MIRROR) column = 7 - column;
+        if (MATRIX_MIRROR[module]) column = 7 - column;
         if (columns[module * 8 + column] >> row & 1) value |= 1 << bit;
       }
       if (value == shownRows[module][digit]) continue;
@@ -126,6 +156,20 @@ void updateTicker(unsigned long now) {
 }
 
 void handleSerialCommand(const char *command) {
+  if (strcmp(command, "TICK:PING") == 0) {
+    Serial.println("PONG:TICKER");
+    return;
+  }
+  if (strcmp(command, "TICK:RESET") == 0) {
+    Serial.println("RESETTING:TICKER");
+    Serial.flush();
+    wdt_enable(WDTO_15MS);
+    while (true) {}
+  }
+  if (strcmp(command, "TICK:CAL") == 0) {
+    calibrating = true;
+    return;
+  }
   if (strncmp(command, "TICK:", 5) != 0) return;
   const char mode = command[5];
   if ((mode != 'S' && mode != 'B') || command[6] != ':') return;
@@ -163,7 +207,12 @@ void configureMatrix(byte module) {
 
 void setup() {
   for (byte module = 0; module < MATRIX_COUNT; ++module) {
+    for (byte pin = 0; pin < 3; ++pin) {
+      pinPort[module][pin] = portOutputRegister(digitalPinToPort(MATRIX_PINS[module][pin]));
+      pinMask[module][pin] = digitalPinToBitMask(MATRIX_PINS[module][pin]);
+    }
     digitalWrite(MATRIX_PINS[module][1], HIGH);
+    digitalWrite(MATRIX_PINS[module][0], LOW);
     for (byte pin = 0; pin < 3; ++pin) pinMode(MATRIX_PINS[module][pin], OUTPUT);
   }
   delay(POWER_SETTLE_MS);
@@ -174,9 +223,11 @@ void setup() {
   matrixRefreshedAt = rowsRefreshedAt = millis();
   Serial.begin(SERIAL_BAUD);
   Serial.println("READY:TICKER");
+  wdt_enable(WDTO_2S); // A hung sketch reboots itself.
 }
 
 void loop() {
+  wdt_reset();
   readSerialCommands();
   const unsigned long now = millis();
   if (now - matrixRefreshedAt >= MATRIX_REFRESH_MS) {

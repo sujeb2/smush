@@ -5,10 +5,13 @@ import time
 
 MAX_LENGTH = 48
 RESEND_SECONDS = 2.0
+PING_SECONDS = 2.0
+SILENT_RESET_SECONDS = 6.0  # No reply for this long: the board is treated as crashed and rebooted.
+RECONNECT_SECONDS = 2.0
 WIDTH = 32
 GLYPH_WIDTH = 5
 GLYPH_PITCH = GLYPH_WIDTH + 1
-STEP_MS = 100  # Keep in step with ticker.ino TICKER_STEP_MS / TICKER_BLINK_MS.
+STEP_MS = 50  # Keep in step with ticker.ino TICKER_STEP_MS / TICKER_BLINK_MS.
 BLINK_MS = 500
 # 5x7 columns (bit 0 = top row) for ASCII 0x20-0x5F, identical to ticker.ino TICKER_FONT.
 FONT = (
@@ -146,22 +149,46 @@ class TickerOutput:
         self.thread.join(timeout=0.2)
 
     def _run(self):
-        previous, sent_at, failed = None, 0.0, None
+        target, message = None, None
+        previous, sent_at, pinged_at, heard_at, broken_at, received = None, 0.0, 0.0, time.monotonic(), None, ""
         while True:
             with self.condition:
-                self.condition.wait_for(lambda: self.pending is not None or self.closing)
+                self.condition.wait_for(lambda: self.pending is not None or self.closing, timeout=0.5)
                 pending, self.pending = self.pending, None
                 closing = self.closing
             if pending is not None:
+                if pending[0] is not target:
+                    previous, heard_at = None, time.monotonic()
                 target, message = pending
-                due = (target, message) != previous or time.monotonic() - sent_at >= RESEND_SECONDS
-                if target is not None and target is not failed and due:
-                    try:
+            now = time.monotonic()
+            waiting = broken_at is not None and now - broken_at < RECONNECT_SECONDS
+            if target is not None and message is not None and not waiting:
+                try:
+                    if broken_at is not None:
+                        target.reopen()
+                        self.report("ticker reconnected")
+                        broken_at, previous, heard_at = None, None, now
+                    while (data := target.read()):
+                        received = (received + data)[-64:]
+                        if "READY:TICKER" in received or "PONG:TICKER" in received:
+                            heard_at = now
+                        if "READY:TICKER" in received:
+                            previous = None  # Rebooted: show the current text again right away.
+                        received = received.replace("READY:TICKER", "").replace("PONG:TICKER", "")
+                    if now - heard_at >= SILENT_RESET_SECONDS:
+                        self.report("ticker not responding, resetting board")
+                        target.reset_board()
+                        heard_at, previous = now, None
+                    elif now - pinged_at >= PING_SECONDS:
+                        target.write_command("TICK:PING")
+                        pinged_at = now
+                    if (target, message) != previous or now - sent_at >= RESEND_SECONDS:
                         target.set_ticker(*message)
-                        previous, sent_at = (target, message), time.monotonic()
-                    except Exception as error:
-                        failed = target
-                        self.report(f"ticker output unavailable: {error}")
+                        previous, sent_at = (target, message), now
+                except Exception as error:
+                    if broken_at is None:
+                        self.report(f"ticker connection lost, retrying: {error}")
+                    broken_at = now
             if closing:
                 return
 
