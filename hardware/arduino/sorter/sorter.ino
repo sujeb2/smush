@@ -5,7 +5,14 @@ const long STEPS_PER_REV = 4096;
 const long SORT_STEPS = STEPS_PER_REV / 8;
 const bool SORT_INVERT = false;
 const unsigned int STEP_INTERVAL_US = 1200; 
-const unsigned long SORT_HOLD_MS = 1500; 
+const unsigned long SORT_ARRIVE_TIMEOUT_MS = 5000;
+const unsigned long SORT_SETTLE_MS = 300;
+const byte SENSOR_TRIG[2] = {6, 8};
+const byte SENSOR_ECHO[2] = {7, 9};
+const unsigned long ECHO_TIMEOUT_US = 25000;
+const unsigned int ARRIVE_DELTA_CM = 3;
+const byte ARRIVE_SAMPLES = 2;
+const unsigned long SENSOR_INTERVAL_MS = 60;
 
 const byte HALF_STEPS[8][4] = {
   {HIGH, LOW,  LOW,  LOW},
@@ -28,12 +35,31 @@ unsigned long lastStepAt = 0;
 unsigned long holdStartedAt = 0;
 SorterState sorterState = SORTER_IDLE;
 SortSide activeSide = SIDE_NONE;
+unsigned int baselineCm = 0;
+byte arriveCount = 0;
+bool arrived = false;
+unsigned long arrivedAt = 0;
+unsigned long sensorReadAt = 0;
 char serialCommand[32];
 byte serialCommandLength = 0;
 bool discardCommand = false;
 
 const char *sideName(SortSide side) {
   return side == SIDE_CAN ? "CAN" : side == SIDE_PLASTIC ? "PLASTIC" : "HOME";
+}
+
+byte sensorIndex(SortSide side) {
+  return side == SIDE_CAN ? 0 : 1;
+}
+
+unsigned int readDistanceCm(byte sensor) {
+  digitalWrite(SENSOR_TRIG[sensor], LOW);
+  delayMicroseconds(2);
+  digitalWrite(SENSOR_TRIG[sensor], HIGH);
+  delayMicroseconds(10);
+  digitalWrite(SENSOR_TRIG[sensor], LOW);
+  const unsigned long echoUs = pulseIn(SENSOR_ECHO[sensor], HIGH, ECHO_TIMEOUT_US);
+  return echoUs == 0 ? ECHO_TIMEOUT_US / 58 : echoUs / 58;
 }
 
 void writePhase() {
@@ -69,6 +95,9 @@ void startSort(SortSide side) {
   }
   const long direction = (side == SIDE_CAN) != SORT_INVERT ? -1 : 1;
   activeSide = side;
+  baselineCm = readDistanceCm(sensorIndex(side));
+  arriveCount = 0;
+  arrived = false;
   sorterState = SORTER_OPENING;
   moveGate(direction * SORT_STEPS);
   Serial.print("SORT_START:");
@@ -89,7 +118,27 @@ void updateSorter() {
       }
       break;
     case SORTER_HOLDING:
-      if (millis() - holdStartedAt >= SORT_HOLD_MS) returnHome();
+      if (arrived) {
+        if (millis() - arrivedAt >= SORT_SETTLE_MS) returnHome();
+        break;
+      }
+      if (millis() - holdStartedAt >= SORT_ARRIVE_TIMEOUT_MS) {
+        Serial.print("SORT_MISSED:");
+        Serial.println(sideName(activeSide));
+        returnHome();
+        break;
+      }
+      if (millis() - sensorReadAt >= SENSOR_INTERVAL_MS) {
+        sensorReadAt = millis();
+        const unsigned int distance = readDistanceCm(sensorIndex(activeSide));
+        arriveCount = distance + ARRIVE_DELTA_CM <= baselineCm ? arriveCount + 1 : 0;
+        if (arriveCount >= ARRIVE_SAMPLES) {
+          arrived = true;
+          arrivedAt = millis();
+          Serial.print("SORT_ARRIVED:");
+          Serial.println(sideName(activeSide));
+        }
+      }
       break;
     case SORTER_CLOSING:
       if (stepTowardTarget()) {
@@ -135,6 +184,11 @@ void setup() {
   for (byte i = 0; i < 4; ++i) {
     digitalWrite(STEPPER_PINS[i], LOW);
     pinMode(STEPPER_PINS[i], OUTPUT);
+  }
+  for (byte i = 0; i < 2; ++i) {
+    digitalWrite(SENSOR_TRIG[i], LOW);
+    pinMode(SENSOR_TRIG[i], OUTPUT);
+    pinMode(SENSOR_ECHO[i], INPUT);
   }
   Serial.begin(SERIAL_BAUD);
   Serial.println("READY:SORTER");

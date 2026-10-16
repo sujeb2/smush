@@ -34,7 +34,7 @@ const unsigned long CONV_SUBSTEPS = CONV_HALF_STEP ? 2UL : 1UL;
 #define MOTOR_PWM 5
 #define MOTOR_SPEED 255
 #define MOTOR_RUNNING_FOR 20000UL
-#define MOTOR_RESET_TIME 3000UL
+#define MOTOR_RESET_TIME MOTOR_RUNNING_FOR
 #define MOTOR_BRAKE_FOR 150UL
 #define PHASE_REPORT_EVERY 1000UL
 
@@ -65,6 +65,7 @@ TM1637Display debugDisplay(DEBUG_CLK, DEBUG_DIO);
 CrusherPhase motor_phase = IDLE;
 int debugCode = DEBUG_READY;
 int pendingDebugCode = DEBUG_READY;
+int shownDebugCode = -1;
 unsigned long debugStartTime = 0;
 
 void showDebug(int code) {
@@ -76,6 +77,8 @@ void showDebug(int code) {
   debugCode = code;
   pendingDebugCode = DEBUG_READY;
   debugStartTime = millis();
+  if(code == shownDebugCode) return;
+  shownDebugCode = code;
   debugDisplay.showNumberDec(code, true);
 }
 
@@ -262,6 +265,7 @@ void setup() {
   while(!Serial);
   sendDebugMessage("\n\n========= IO BOARD INIT =========\n", true);
   debugDisplay.showNumberDec(DEBUG_MOTOR_INIT, true);
+  shownDebugCode = DEBUG_MOTOR_INIT;
   crusher_backward(MOTOR_SPEED);
   crusherStartedAt = millis();
   crusherRunning = true;

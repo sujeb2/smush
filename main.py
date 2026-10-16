@@ -295,6 +295,8 @@ class Main:
                 status("Arduino connected.")
                 if self._attach_sorter():
                     status("Sorter connected.")
+                if self._attach_blocker():
+                    status("Blocker connected.")
             status("Checking webcam connection...")
             webcam_error = self._check_webcam()
             if webcam_error is not None:
@@ -347,6 +349,18 @@ class Main:
         })
         return True
 
+    def _attach_blocker(self):
+        port = config.get("SERIAL", "BlockerPort", fallback="").strip()
+        if not port:
+            return False
+        try:
+            blocker = SerialIO(port, config["SERIAL"]["SerialBaudrate"], timeout=config["SERIAL"].getint("SerialTimeout"))
+        except Exception as error:
+            print(f"[{self.timestamp}] [main] blocker unavailable on {port}: {error}")
+            return False
+        self.serial.attach_blocker(blocker)
+        return True
+
     def _check_webcam(self):
         camera = None
         try:
@@ -382,6 +396,7 @@ class Main:
                     timeout=config["SERIAL"].getint("SerialTimeout"),
                 )
                 self._attach_sorter()
+                self._attach_blocker()
             import model
 
             self.model = model.Model(config["GENERIC"]["ModelPath"], serial=self.serial)
