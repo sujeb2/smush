@@ -21,7 +21,7 @@ void disableWatchdogOnBoot() {
 #define CONV_START_STEPS_PER_SECOND 50UL
 #define CONV_RAMP_MS 1000UL
 #define CONV_REVERSE false
-#define CONV_FORWARD_FOR 1000UL
+#define CONV_FORWARD_FOR 12000UL
 
 #if CONV_STEPS_PER_SECOND == 0 || CONV_STEPS_PER_SECOND > 500000UL || CONV_START_STEPS_PER_SECOND == 0 || CONV_START_STEPS_PER_SECOND > 500000UL
 #error "Target and startup rates must be between 1 and 500000 full steps/s."
