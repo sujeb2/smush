@@ -343,11 +343,15 @@ class Main:
         except Exception as error:
             print(f"[{self.timestamp}] [main] sorter unavailable on {port}: {error}")
             return False
+        replied = sorter.handshake("SORT:PING", ("READY:SORTER", "PONG:SORTER"))
+        if not replied:
+            # Still attach: tracked sends retry and resend once the board reports READY.
+            print(f"[{self.timestamp}] [main] no reply from sorter on {port}; check SorterPort and that sorter.ino is flashed")
         self.serial.attach_sorter(sorter, {
             1: config.get("SERIAL", "SorterObject1", fallback="CAN"),
             2: config.get("SERIAL", "SorterObject2", fallback="PLASTIC"),
         })
-        return True
+        return replied
 
     def _attach_blocker(self):
         port = config.get("SERIAL", "BlockerPort", fallback="").strip()

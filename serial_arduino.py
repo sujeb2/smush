@@ -143,14 +143,33 @@ class SerialIO:
 
     def send_tracked(self, command, ack):
         self.last_command, self.last_ack = command, ack.lower()
-        self.awaiting = (self.last_ack, time.monotonic(), 1)
+        now = time.monotonic()
+        self.awaiting = (self.last_ack, now, 1, now)
         try:
             self.write_command(command)
         except serial.SerialException as error:
             print(f"[{self.timestamp}] [SerialIO] write failed on {self.port}: {error}")
             self.failed_at = time.monotonic()
 
-    def service(self, retry_after=1.0, attempts=3):
+    def handshake(self, ping, replies, timeout=4.0):
+        # Opening the port resets a Nano, so accept its boot banner or a ping reply.
+        replies = tuple(reply.lower() for reply in replies)
+        received, pinged_at = "", 0.0
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            now = time.monotonic()
+            if now - pinged_at >= 0.5:
+                self.write_command(ping)
+                pinged_at = now
+            if self.ser.in_waiting > 0:
+                received += self.ser.read(self.ser.in_waiting).decode('utf-8', errors='replace').lower()
+                if any(reply in received for reply in replies):
+                    self.ser.reset_input_buffer()
+                    return True
+            time.sleep(0.02)
+        return False
+
+    def service(self, retry_after=1.0, attempts=3, busy_timeout=15.0):
         now = time.monotonic()
         try:
             if self.failed_at is not None:
@@ -167,26 +186,34 @@ class SerialIO:
                 *lines, self.log_buffer = (self.log_buffer + data).split("\n")
                 self.log_buffer = self.log_buffer[-256:]
                 for line in lines:
-                    if line.strip().startswith(("sort_arrived:", "sort_missed:")):
+                    if line.strip():
                         print(f"[{self.timestamp}] [SerialIO] {self.port}: {line.strip().upper()}")
             if "ready:" in self.reply_buffer:
                 self.reply_buffer = ""
                 if self.last_command and (self.awaiting or self.resend_on_ready):
-                    self.awaiting = (self.last_ack, now, 1)
+                    self.awaiting = (self.last_ack, now, 1, now)
                     self.write_command(self.last_command)
                 return
             if self.awaiting is None:
                 return
-            ack, sent_at, tries = self.awaiting
+            ack, sent_at, tries, started_at = self.awaiting
             if ack in self.reply_buffer:
                 self.reply_buffer = self.reply_buffer[self.reply_buffer.find(ack) + len(ack):]
                 self.awaiting = None
+            elif "_busy" in self.reply_buffer:
+                # The board is mid-cycle (a sort can take ~6 s); wait it out without spending a retry.
+                self.reply_buffer = self.reply_buffer[self.reply_buffer.find("_busy") + len("_busy"):]
+                if now - started_at >= busy_timeout:
+                    print(f"[{self.timestamp}] [SerialIO] {self.port} stayed busy, dropped {self.last_command}")
+                    self.awaiting = None
+                else:
+                    self.awaiting = (ack, now, 1, started_at)
             elif now - sent_at >= retry_after:
                 if tries >= attempts:
                     print(f"[{self.timestamp}] [SerialIO] no reply to {self.last_command} on {self.port}")
                     self.awaiting = None
                 else:
-                    self.awaiting = (ack, now, tries + 1)
+                    self.awaiting = (ack, now, tries + 1, started_at)
                     self.write_command(self.last_command)
         except serial.SerialException as error:
             print(f"[{self.timestamp}] [SerialIO] connection lost on {self.port}: {error}")

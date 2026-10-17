@@ -109,6 +109,12 @@ void returnHome() {
   moveGate(0);
 }
 
+void commandHome() {
+  // Ack like SORT:<side> so the PC's tracked send sees a reply.
+  Serial.println("SORT_START:HOME");
+  returnHome();
+}
+
 void updateSorter() {
   switch (sorterState) {
     case SORTER_OPENING:
@@ -156,7 +162,8 @@ void updateSorter() {
 void handleSerialCommand(const char *command) {
   if (strcmp(command, "SORT:CAN") == 0) startSort(SIDE_CAN);
   else if (strcmp(command, "SORT:PLASTIC") == 0) startSort(SIDE_PLASTIC);
-  else if (strcmp(command, "SORT:HOME") == 0) returnHome();
+  else if (strcmp(command, "SORT:HOME") == 0) commandHome();
+  else if (strcmp(command, "SORT:PING") == 0) Serial.println("PONG:SORTER");
   else Serial.println("SORT_ERROR");
 }
 
