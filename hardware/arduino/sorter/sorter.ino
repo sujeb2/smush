@@ -2,7 +2,7 @@
 const byte STEPPER_PINS[4] = {2, 3, 4, 5};
 const unsigned long SERIAL_BAUD = 9600;
 const long STEPS_PER_REV = 4096;
-const long SORT_STEPS = STEPS_PER_REV / 8;
+const long SORT_STEPS = STEPS_PER_REV / 6;
 const bool SORT_INVERT = false;
 // 1200 us stalled the 28BYJ-48 under the gate's load; 2000 us trades ~0.4 s for torque.
 const unsigned int STEP_INTERVAL_US = 2000;
