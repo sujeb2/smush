@@ -161,6 +161,7 @@ class Model:
                 return self.fallbackLiveFeed(show_preview)
 
             last_report = None
+            self._reset_presence()
             while not self.captured:
                 busy, generation = self._recognition_state()
                 ret, frame = self.camera.read()
@@ -168,9 +169,16 @@ class Model:
                     print(f"[{self.timestamp}] [ModelRecog] failed to grab frame from camera.")
                     return 1
                 if busy or not self._recognition_allowed(generation):
+                    self._reset_vote()
                     if show_preview:
                         show_preview = self._preview_raw_frame(frame, wait_time_ms)
                     time.sleep(0.05)
+                    continue
+                if not self._object_present(frame):
+                    # The classifier has no "empty" class, so never ask it about an empty platform.
+                    self._reset_vote()
+                    if show_preview:
+                        show_preview = self._preview_raw_frame(frame, wait_time_ms)
                     continue
                 self.detections = self.predict(frame)
 
@@ -197,13 +205,16 @@ class Model:
                             if result.probs is not None:
                                 print(f'[{self.timestamp}] [ModelRecog] top class: {result.names[result.probs.top1]}, confidence: {float(result.probs.top1conf):.4f}')
                             print(f'[{self.timestamp}] [ModelRecog] confident: {self.confident}, names: {self.names}')
-                        for index in (1, 2):
-                            expected = config['DETECTION'].get(f'ExpectedObject_{index}')
-                            if expected and expected in self.names:
-                                if not self.serial_ignore:
-                                    if not self.serial.write_detection(f"obj{index}_detect[{expected}]\n", generation):
-                                        self.names, self.confident, self.detections = [], [], []
-                                        break
+                        match = next(((index, expected) for index in (1, 2)
+                                      if (expected := config['DETECTION'].get(f'ExpectedObject_{index}'))
+                                      and expected in self.names), None)
+                        if self._vote(match) and not self.serial_ignore:
+                            index, expected = match
+                            print(f'[{self.timestamp}] [ModelRecog] confirmed {expected} over {self._vote_count} frames')
+                            self._reset_vote()
+                            if not self.serial.write_detection(f"obj{index}_detect[{expected}]\n", generation):
+                                self.names, self.confident, self.detections = [], [], []
+                                break
                 if show_preview:
                     try:
                         key = cv2.waitKey(wait_time_ms) & 0xFF
@@ -238,6 +249,50 @@ class Model:
             options['conf'] = config['DETECTION'].getfloat('Confidence', fallback=0.5)
         return self.model.predict(source=source, stream=True, verbose=False,
                                   device=getattr(self, 'device', None) or self._select_device(), **options)
+
+    def _reset_vote(self):
+        self._vote_label, self._vote_count = None, 0
+
+    def _vote(self, match):
+        # One frame is not enough: hands, shadows and motion blur flip the top class.
+        # Require the same expected object on ConfirmFrames consecutive frames.
+        if match is None or match != self._vote_label:
+            self._vote_label, self._vote_count = match, 1 if match else 0
+        else:
+            self._vote_count += 1
+        return match is not None and self._vote_count >= config['DETECTION'].getint('ConfirmFrames', fallback=5)
+
+    def _reset_presence(self):
+        self._background, self._changed_since = None, None
+        self._reset_vote()
+
+    def _object_present(self, frame):
+        threshold = config['DETECTION'].getfloat('PresenceThreshold', fallback=0.02)
+        if threshold <= 0:
+            return True
+        small = cv2.cvtColor(cv2.resize(frame, (160, 120)), cv2.COLOR_BGR2GRAY)
+        small = cv2.GaussianBlur(small, (5, 5), 0).astype(numpy.float32)
+        if self._background is None:
+            # Startup frame is the empty-platform reference.
+            self._background = small
+            return False
+        delta = config['DETECTION'].getfloat('PresencePixelDelta', fallback=25)
+        changed = float((cv2.absdiff(small, self._background) > delta).mean())
+        now = time.monotonic()
+        if changed < threshold:
+            # Empty: follow slow lighting drift.
+            cv2.accumulateWeighted(small, self._background, 0.05)
+            self._changed_since = None
+            return False
+        if self._changed_since is None:
+            self._changed_since = now
+        elif now - self._changed_since >= config['DETECTION'].getfloat('BackgroundResetSeconds', fallback=20):
+            # Something static has sat there unrecognized (or the reference was taken with an
+            # item present); adopt the current view as the new empty reference.
+            print(f'[{self.timestamp}] [ModelRecog] scene static for too long, refreshing empty reference')
+            self._background, self._changed_since = small, None
+            return False
+        return True
 
     def _recognition_state(self):
         if self.serial_ignore:

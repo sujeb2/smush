@@ -4,8 +4,13 @@ const unsigned long SERIAL_BAUD = 9600;
 const long STEPS_PER_REV = 4096;
 const long SORT_STEPS = STEPS_PER_REV / 8;
 const bool SORT_INVERT = false;
-const unsigned int STEP_INTERVAL_US = 1200; 
+// 1200 us stalled the 28BYJ-48 under the gate's load; 2000 us trades ~0.4 s for torque.
+const unsigned int STEP_INTERVAL_US = 2000;
+// The gate opens when the item is dropped and holds through the crush cycle
+// (~52 s) until the PC sends SORT:RELEASE after crushing_done.
+const unsigned long SORT_MAX_HOLD_MS = 90000;
 const unsigned long SORT_ARRIVE_TIMEOUT_MS = 5000;
+const unsigned long SORT_RELEASE_MIN_MS = 1500;
 const unsigned long SORT_SETTLE_MS = 300;
 const byte SENSOR_TRIG[2] = {6, 8};
 const byte SENSOR_ECHO[2] = {7, 9};
@@ -39,6 +44,8 @@ unsigned int baselineCm = 0;
 byte arriveCount = 0;
 bool arrived = false;
 unsigned long arrivedAt = 0;
+bool released = false;
+unsigned long releasedAt = 0;
 unsigned long sensorReadAt = 0;
 char serialCommand[32];
 byte serialCommandLength = 0;
@@ -98,6 +105,7 @@ void startSort(SortSide side) {
   baselineCm = readDistanceCm(sensorIndex(side));
   arriveCount = 0;
   arrived = false;
+  released = false;
   sorterState = SORTER_OPENING;
   moveGate(direction * SORT_STEPS);
   Serial.print("SORT_START:");
@@ -107,6 +115,16 @@ void startSort(SortSide side) {
 void returnHome() {
   sorterState = SORTER_CLOSING;
   moveGate(0);
+}
+
+void releaseSort() {
+  // Crushing is done: wait for the item (if it has not fallen yet), then close.
+  if (sorterState == SORTER_OPENING || sorterState == SORTER_HOLDING) {
+    released = true;
+    releasedAt = millis();
+  }
+  Serial.print("SORT_RELEASE:");
+  Serial.println(sideName(activeSide));
 }
 
 void commandHome() {
@@ -123,18 +141,28 @@ void updateSorter() {
         sorterState = SORTER_HOLDING;
       }
       break;
-    case SORTER_HOLDING:
-      if (arrived) {
-        if (millis() - arrivedAt >= SORT_SETTLE_MS) returnHome();
-        break;
-      }
-      if (millis() - holdStartedAt >= SORT_ARRIVE_TIMEOUT_MS) {
-        Serial.print("SORT_MISSED:");
+    case SORTER_HOLDING: {
+      const unsigned long now = millis();
+      if (!released && now - holdStartedAt >= SORT_MAX_HOLD_MS) {
+        Serial.print("SORT_TIMEOUT:");
         Serial.println(sideName(activeSide));
         returnHome();
         break;
       }
-      if (millis() - sensorReadAt >= SENSOR_INTERVAL_MS) {
+      if (released) {
+        const unsigned long sinceRelease = now - releasedAt;
+        if (arrived && sinceRelease >= SORT_RELEASE_MIN_MS && now - arrivedAt >= SORT_SETTLE_MS) {
+          returnHome();
+          break;
+        }
+        if (!arrived && sinceRelease >= SORT_ARRIVE_TIMEOUT_MS) {
+          Serial.print("SORT_MISSED:");
+          Serial.println(sideName(activeSide));
+          returnHome();
+          break;
+        }
+      }
+      if (!arrived && now - sensorReadAt >= SENSOR_INTERVAL_MS) {
         sensorReadAt = millis();
         const unsigned int distance = readDistanceCm(sensorIndex(activeSide));
         arriveCount = distance + ARRIVE_DELTA_CM <= baselineCm ? arriveCount + 1 : 0;
@@ -146,6 +174,7 @@ void updateSorter() {
         }
       }
       break;
+    }
     case SORTER_CLOSING:
       if (stepTowardTarget()) {
         releaseStepper();
@@ -162,6 +191,7 @@ void updateSorter() {
 void handleSerialCommand(const char *command) {
   if (strcmp(command, "SORT:CAN") == 0) startSort(SIDE_CAN);
   else if (strcmp(command, "SORT:PLASTIC") == 0) startSort(SIDE_PLASTIC);
+  else if (strcmp(command, "SORT:RELEASE") == 0) releaseSort();
   else if (strcmp(command, "SORT:HOME") == 0) commandHome();
   else if (strcmp(command, "SORT:PING") == 0) Serial.println("PONG:SORTER");
   else Serial.println("SORT_ERROR");

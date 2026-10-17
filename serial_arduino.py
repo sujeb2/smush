@@ -92,11 +92,14 @@ class SerialIO:
             self.status_buffer = self.status_buffer[position + len(command):]
             if command.startswith("obj_dropped"):
                 self.pending_sort = self.sorter_kinds.get(int(command[-1]))
+                self._run_sorter("open")
                 if not self.crushing_busy:
                     self.crushing_generation += 1
                 self.crushing_busy = True
                 continue
             if command == "resetting":
+                if self.pending_sort is not None:
+                    self._run_sorter("home")
                 self.pending_sort = None
                 self.blocker_side = None
                 continue
@@ -107,7 +110,7 @@ class SerialIO:
                 self._run_blocker("LEFT")
                 continue
             if command == "crushing_done":
-                self._run_sorter()
+                self._run_sorter("release")
             busy = command == "crushing_busy"
             if busy:
                 self._run_blocker("LEFT")
@@ -121,13 +124,21 @@ class SerialIO:
         self.sorter = sorter
         self.sorter_kinds = kinds
 
-    def _run_sorter(self):
-        # crushing_done arrives once the crusher has retracted, so the crushed item is ready to sort.
-        kind, self.pending_sort = self.pending_sort, None
+    def _run_sorter(self, step):
+        # The gate opens toward the item's bin as soon as it is dropped, holds through the
+        # crush (pieces can fall at any point), and is released once the crusher retracts.
+        kind = self.pending_sort
+        if step != "open":
+            self.pending_sort = None
         if kind is None or self.sorter is None:
             return
         try:
-            self.sorter.sort_object(kind)
+            if step == "open":
+                self.sorter.sort_object(kind)
+            elif step == "release":
+                self.sorter.release_sort()
+            else:
+                self.sorter.sort_object("HOME")
         except Exception as error:
             print(f"[{self.timestamp}] [SerialIO] sorter write failed: {error}")
 
@@ -260,11 +271,15 @@ class SerialIO:
         self.write_command(f"TICK:{'B' if blink else 'S'}:{text}")
 
     def sort_object(self, kind):
-        # Sorter Nano gate (hardware/arduino/sorter); replies SORT_DONE:<side> when back at center.
+        # Sorter Nano gate (hardware/arduino/sorter); holds open until SORT:RELEASE, then
+        # replies SORT_DONE:<side> when back at center.
         kind = str(kind).strip().upper()
         if kind not in ("CAN", "PLASTIC", "HOME"):
             raise ValueError("sorter target must be CAN, PLASTIC or HOME")
         self.send_tracked(f"SORT:{kind}", f"SORT_START:{kind}")
+
+    def release_sort(self):
+        self.send_tracked("SORT:RELEASE", "SORT_RELEASE:")
 
     def block_holes(self, side):
         side = str(side).strip().upper()
