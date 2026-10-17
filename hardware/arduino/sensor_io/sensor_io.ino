@@ -16,7 +16,7 @@ void disableWatchdogOnBoot() {
 
 #define CONV_ENABLE_A 12
 #define CONV_ENABLE_B 13
-#define CONV_STEPS_PER_SECOND 300UL // check down information for range
+#define CONV_STEPS_PER_SECOND 500UL // check down information for range
 #define CONV_HALF_STEP true
 #define CONV_START_STEPS_PER_SECOND 50UL
 #define CONV_RAMP_MS 1000UL
@@ -33,7 +33,7 @@ const unsigned long CONV_SUBSTEPS = CONV_HALF_STEP ? 2UL : 1UL;
 #define MOTOR_STEP_B 3
 #define MOTOR_PWM 5
 #define MOTOR_SPEED 255
-#define MOTOR_RUNNING_FOR 20000UL
+#define MOTOR_RUNNING_FOR 13000UL
 #define MOTOR_RESET_TIME MOTOR_RUNNING_FOR
 #define MOTOR_BRAKE_FOR 150UL
 #define PHASE_REPORT_EVERY 1000UL
